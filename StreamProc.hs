@@ -1,5 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, BangPatterns #-}
 
+module StreamProc where
+
 import Control.Monad (liftM, ap, (>=>))
 import Control.Arrow (first)
 

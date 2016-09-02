@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, GeneralizedNewtypeDeriving, LambdaCase #-}
+{-# LANGUAGE TypeSynonymInstances, GeneralizedNewtypeDeriving, LambdaCase, TupleSections, ScopedTypeVariables #-}
 
 module Main where
 
@@ -9,19 +9,15 @@ import Control.Monad.Trans
 import Control.Concurrent (threadDelay)
 import qualified System.MIDI as MIDI
 import qualified Data.Sequence as Seq
+import qualified StreamProc as S
 
-{-
-connectOutput :: String -> IO PlayState
+connectOutput :: String -> IO MIDI.Connection
 connectOutput destName = do
     destinations <- MIDI.enumerateDestinations
     [destination] <- filterM (\d -> (destName ==) <$> MIDI.getName d) destinations
     conn <- MIDI.openDestination destination
     putStrLn . ("Connected to destintion " ++) =<< MIDI.getName destination
-    return $ PlayState {
-        psConnection = conn,
-        psPlayingNotes = [],
-        psFreeChannels = Seq.fromList [1..8]
-    }
+    return conn
 
 connectInput :: String -> IO MIDI.Connection
 connectInput sourceName = do
@@ -35,54 +31,39 @@ connectInput sourceName = do
 
 main :: IO ()
 main = do
-    state <- connectOutput "IAC Bus 1"
     source <- connectInput "UM-ONE"
+    dest <- connectOutput "IAC Bus 1"
     MIDI.start source
-    (`evalStateT` state) . forever $ do
-        liftIO $ threadDelay 1000  -- 1 millisec
-        events <- liftIO (MIDI.getEvents source)
-        mapM_ procEvent events
+    runStreamProc source dest S.identity
 
-procEvent :: MIDI.MidiEvent -> StateT PlayState IO ()
-procEvent (MIDI.MidiEvent _ (MIDI.MidiMessage _ msg)) = go msg
+runStreamProc :: forall a. MIDI.Connection -> MIDI.Connection -> 
+                 S.StreamProc MIDI.MidiMessage MIDI.MidiMessage a -> IO a
+runStreamProc inDevice outDevice = \proc -> do
+    startTime <- MIDI.currentTime inDevice
+    go startTime Nothing proc
     where
-    go (MIDI.NoteOn key vel) = noteOnKey key vel
-    go (MIDI.NoteOff key _) = noteOffKey key
-    go _ = return ()
--}
-
--- Use cases:
--- - Playing scales/arpeggios to a metronome, measuring timing and accuracy.
--- -- Record and analyze, just need to trigger metronome.
--- -- Need to reset current scale if there's a two beat pause.
--- - Randomly generating keys and chords and measuring response and time.
--- -- Similar, with a more complex metronome. 
--- -- Possibly need to t
-
--- Here's an idea, we have a (causal) function EventStream -> EventStream.  The
--- resulting EventStream is what ends up getting played (can even filter out
--- source notes).  For metronome, we just merge with a metronome EventStream, and then
--- we can analyze afterward.  
---
--- It's dangerous to try to express it as a proper function; as reactive taught
--- us, we probably need a more robust FRP model.  We need to be able to merge,
--- we need to process events in context (e.g. looking at recent events), and
--- generate new ones.
-
-{-
--- Possibly we need StreamProc to be a consumer and a producer simultaneously, sort of a stream
--- processor, sort of imperative.
-
-detectReset :: StreamProc (Either Beat a) ()
-detectReset = mapCX $ \cx -> \case
-            Left beat -> when (null [ () | Right _ <- latest (2 * beatSize) cx ]) (gen ())
-            Right _ -> return ()
-
-currentScale :: Int -> Int -> StreamProc (Either Beat Note) Int
-currentScale beats start = do
-    gen start
-    reset <- wait ((detectReset >> gen True) `merge` (waitTime (beats * beatSize) >> gen False))
-    if reset
-        then currentScale beats start
-        else currentScale beats (start+1)
--}
+    -- e is a one-message buffer
+    go :: MIDI.TimeStamp -> Maybe MIDI.MidiEvent -> S.StreamProc MIDI.MidiMessage MIDI.MidiMessage a -> IO a
+    go t e (S.Input (S.Return proc)) = go t e proc
+    go t e (S.Input (S.Wait d f)) = loop e
+        where
+        loop :: Maybe MIDI.MidiEvent -> IO a
+        loop e = do
+            event <- maybe (MIDI.getNextEvent inDevice) (return . Just) e
+            (timestamp, message) <- case event of
+                Nothing -> fmap (,Nothing) (MIDI.currentTime inDevice)
+                Just (MIDI.MidiEvent timestamp message) -> return (timestamp, Just message)
+            let timediff = S.TimeDiff (fromIntegral (timestamp-t) / 1000)
+            case message of
+                Nothing
+                    -- there might be skew here, since we're not accounting for t-timediff
+                    | timediff >= d -> go timestamp Nothing (S.Input (f Nothing))
+                    | otherwise -> threadDelay 1000 >> loop Nothing
+                Just m
+                    -- skew here too
+                    | timediff >= d -> go timestamp e (S.Input (f Nothing))
+                    | otherwise -> go timestamp Nothing (S.Input (f (Just (timediff, m))))
+    go t e (S.Output m proc) = do
+        MIDI.send outDevice m
+        go t e proc
+    go t e (S.Caboose x) = return x
