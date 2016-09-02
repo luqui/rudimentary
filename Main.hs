@@ -9,7 +9,9 @@ import Control.Monad.Trans
 import Control.Concurrent (threadDelay)
 import qualified System.MIDI as MIDI
 import qualified Data.Sequence as Seq
+
 import qualified StreamProc as S
+import qualified Exercises
 
 connectOutput :: String -> IO MIDI.Connection
 connectOutput destName = do
@@ -34,20 +36,18 @@ main = do
     source <- connectInput "UM-ONE"
     dest <- connectOutput "IAC Bus 1"
     MIDI.start source
-    runStreamProc source dest S.identity
+    runStreamProc source dest (fromExerciseForm Exercises.cScale)
 
-runStreamProc :: forall a. MIDI.Connection -> MIDI.Connection -> 
+runStreamProc :: MIDI.Connection -> MIDI.Connection -> 
                  S.StreamProc MIDI.MidiMessage MIDI.MidiMessage a -> IO a
 runStreamProc inDevice outDevice = \proc -> do
     startTime <- MIDI.currentTime inDevice
     go startTime Nothing proc
     where
     -- e is a one-message buffer
-    go :: MIDI.TimeStamp -> Maybe MIDI.MidiEvent -> S.StreamProc MIDI.MidiMessage MIDI.MidiMessage a -> IO a
     go t e (S.Input (S.Return proc)) = go t e proc
     go t e (S.Input (S.Wait d f)) = loop e
         where
-        loop :: Maybe MIDI.MidiEvent -> IO a
         loop e = do
             event <- maybe (MIDI.getNextEvent inDevice) (return . Just) e
             (timestamp, message) <- case event of
@@ -67,3 +67,17 @@ runStreamProc inDevice outDevice = \proc -> do
         MIDI.send outDevice m
         go t e proc
     go t e (S.Caboose x) = return x
+
+fromExerciseForm :: S.StreamProc Exercises.Note Exercises.Note a 
+                 -> S.StreamProc MIDI.MidiMessage MIDI.MidiMessage a
+fromExerciseForm = S.mapFilterIO msgToNote noteToMsg
+    where
+    msgToNote (MIDI.MidiMessage _ (MIDI.NoteOn key vel))
+        | vel /= 0 = Just (Exercises.NoteOn key vel)
+        | vel == 0 = Just (Exercises.NoteOff key)
+    msgToNote (MIDI.MidiMessage _ (MIDI.NoteOff key _))
+        = Just (Exercises.NoteOff key)
+    msgToNote _ = Nothing
+
+    noteToMsg (Exercises.NoteOn key vel) = Just (MIDI.MidiMessage 1 (MIDI.NoteOn key vel))
+    noteToMsg (Exercises.NoteOff key) = Just (MIDI.MidiMessage 1 (MIDI.NoteOn key 0))

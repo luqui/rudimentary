@@ -1,12 +1,12 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, BangPatterns #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, BangPatterns, TupleSections #-}
 
 module StreamProc where
 
-import Control.Monad (liftM, ap, (>=>))
+import Control.Monad (liftM, ap, (>=>), join)
 import Control.Arrow (first)
 
 newtype TimeDiff = TimeDiff Double
-    deriving (Eq, Ord, Num)
+    deriving (Eq, Ord, Num, Show)
 
 infinity :: TimeDiff
 infinity = TimeDiff (1/0)
@@ -23,8 +23,12 @@ instance Monad (Future i) where
 instance Functor (Future i) where fmap = liftM
 instance Applicative (Future i) where pure = return; (<*>) = ap
 
-mapIF :: (i' -> i) -> Future i a -> Future i' a
-mapIF f (Wait d f') = Wait d (mapIF f . f' . (fmap.fmap) f)
+mapFilterIF :: (i' -> Maybe i) -> Future i a -> Future i' a
+mapFilterIF f (Wait d f') = Wait d $ mapFilterIF f . \case
+    Nothing -> f' Nothing
+    Just (t,x) | Just x' <- f x -> f' (Just (t,x'))
+               | otherwise      -> Wait (d-t) f'
+mapFilterIF f (Return x) = Return x
 
 waitF :: TimeDiff -> Future i (Maybe i)
 waitF d = Wait d (return . fmap snd)
@@ -59,16 +63,13 @@ instance Monad (StreamProc i o) where
 instance Functor (StreamProc i o) where fmap = liftM
 instance Applicative (StreamProc i o) where pure = return; (<*>) = ap
 
-mapI :: (i' -> i) -> StreamProc i o a -> StreamProc i' o a
-mapI f (Input c) = Input (fmap (mapI f) (mapIF f c))
-mapI f (Output o p) = Output o (mapI f p)
-mapI _ (Caboose a) = Caboose a
+mapFilterIO :: (i' -> Maybe i) -> (o -> Maybe o') -> StreamProc i o a -> StreamProc i' o' a
+mapFilterIO ifun ofun (Input c) = Input (fmap (mapFilterIO ifun ofun) (mapFilterIF ifun c))
+mapFilterIO ifun ofun (Output o p) = maybe id Output (ofun o) (mapFilterIO ifun ofun p)
+mapFilterIO ifun ofun (Caboose x) = Caboose x
 
 mapO :: (o -> o') -> StreamProc i o a -> StreamProc i o' a
-mapO f (Input c) = Input (fmap (mapO f) c)
-mapO f (Output o p) = Output (f o) (mapO f p)
-mapO _ (Caboose a) = Caboose a
-
+mapO f = mapFilterIO Just (Just . f)
 
 fromFuture :: Future i a -> StreamProc i o a
 fromFuture = Input . fmap return
