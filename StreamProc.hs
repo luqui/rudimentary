@@ -47,6 +47,13 @@ tagTimeF (Wait d f) = Wait d $ \case
     Nothing -> fmap (first (+d)) (tagTimeF (f Nothing))
     i@(Just (d',_)) -> fmap (first (+d')) (tagTimeF (f i))
 
+chooseFirstF :: Future i a -> Future i b -> Future i (Either (a, Future i b) (Future i a, b))
+chooseFirstF (Return x) f = Return (Left (x, f))
+chooseFirstF f (Return y) = Return (Right (f, y))
+chooseFirstF (Wait d f) (Wait d' f') = Wait (min d d') $ \case 
+    i@(Just _) -> chooseFirstF (f i) (f' i)
+    Nothing | d <= d'   -> chooseFirstF (f Nothing) (Wait (d'-d) f')
+            | otherwise -> chooseFirstF (Wait (d-d') f) (f' Nothing)
 
 
 data StreamProc i o a 
@@ -85,6 +92,27 @@ waitForever = fromFuture waitForeverF
 
 output :: o -> StreamProc i o ()
 output x = Output x (Caboose ())
+
+mergeInner :: StreamProc i o a -> StreamProc i o a -> StreamProc i o a
+mergeInner (Caboose x) _ = Caboose x
+mergeInner _ (Caboose y) = Caboose y
+mergeInner (Output o xp) yp = Output o (mergeInner xp yp)
+mergeInner xp (Output o yp) = Output o (mergeInner xp yp)
+mergeInner (Input x) (Input y) = Input $ fmap switch (chooseFirstF x y)
+    where
+    switch (Left (s,f)) = mergeInner s (Input f)
+    switch (Right (f,s)) = mergeInner (Input f) s
+
+mergeOuter :: StreamProc i o a -> StreamProc i o b -> StreamProc i o (a,b)
+mergeOuter (Caboose x) yp = fmap (x,) yp
+mergeOuter xp (Caboose y) = fmap (,y) xp
+mergeOuter (Output o xp) yp = Output o (mergeOuter xp yp)
+mergeOuter xp (Output o yp) = Output o (mergeOuter xp yp)
+mergeOuter (Input x) (Input y) = Input $ fmap switch (chooseFirstF x y)
+    where
+    switch (Left (s,f)) = mergeOuter s (Input f)
+    switch (Right (f,s)) = mergeOuter (Input f) s
+
 
 identity :: StreamProc i i a
 identity = waitForever >>= \x -> output x >> identity
