@@ -78,6 +78,9 @@ mapFilterIO ifun ofun (Caboose x) = Caboose x
 mapO :: (o -> o') -> StreamProc i o a -> StreamProc i o' a
 mapO f = mapFilterIO Just (Just . f)
 
+mapFilterO :: (o -> Maybe o') -> StreamProc i o a -> StreamProc i o' a
+mapFilterO = mapFilterIO Just
+
 fromFuture :: Future i a -> StreamProc i o a
 fromFuture = Input . fmap return
 
