@@ -81,6 +81,12 @@ mapO f = mapFilterIO Just (Just . f)
 mapFilterO :: (o -> Maybe o') -> StreamProc i o a -> StreamProc i o' a
 mapFilterO = mapFilterIO Just
 
+-- o0 does not occur in the output!
+scanO :: (s -> o -> (o',s)) -> s -> StreamProc i o a -> StreamProc i o' a
+scanO f s (Input fut) = Input (fmap (scanO f s) fut)
+scanO f s (Output o proc) = let (o',s') = f s o in Output o' (scanO f s' proc)
+scao0 f s (Caboose x) = Caboose x
+
 fromFuture :: Future i a -> StreamProc i o a
 fromFuture = Input . fmap return
 

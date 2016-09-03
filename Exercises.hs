@@ -2,6 +2,7 @@
 
 module Exercises where
 
+import Control.Monad (forever)
 import StreamProc
 import qualified System.Random as Random
 
@@ -25,18 +26,16 @@ cScale = go (scaleAt 60 majorScaleDegrees)
             NoteOff pitch -> output (NoteOff pitch) >> go (n:ns)
             _ -> go (n:ns)
 
-metronome :: Double -> StreamProc i Int a
-metronome tempo = go 0
-    where
-    go !n = do
-        output n
-        waitTime (TimeDiff (60/tempo))
-        go (n+1)
+metronome :: Double -> StreamProc i () a
+metronome tempo = forever $ do
+    output ()
+    waitTime (TimeDiff (60/tempo))
 
-randomMetronome :: Double -> StreamProc i Int a
-randomMetronome = mapFilterO (guard <$> fst . Random.random . Random.mkStdGen <*> id) . metronome
+maskedMetronome :: Double -> [Bool] -> StreamProc i () a
+maskedMetronome tempo bools = 
+    mapFilterO maybify (scanO (\(b:bs) _ -> (b,bs)) bools (metronome tempo))
     where
-    guard False = const Nothing
-    guard True = Just
+    maybify False = Nothing
+    maybify True = Just ()
 
 
