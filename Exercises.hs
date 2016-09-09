@@ -74,11 +74,12 @@ invertedFourNoteArpeggioExercise :: Scale -> KeyTraversal -> Exercise
 invertedFourNoteArpeggioExercise scale ktrav = Exercise $
     [ invertedFourNoteArpeggioSegment (baseScale (48 + k) scale) | k <- ktrav ]
 
-checkSegment :: Double -> Segment -> StreamProc Note Note Segment
-checkSegment tempo (Segment notes) =
+metronomeTone = NoteOn 84 100
+
+recordSegment :: Double -> Segment -> StreamProc Note Note Segment
+recordSegment tempo (Segment notes) =
     mergeInner (mapO (const metronomeTone) (metronome tempo)) $ Segment <$> go 0 
     where
-    metronomeTone = NoteOn 84 100
     fromBeats beats = 60 * beats / tempo
     toBeats t = t * tempo / 60
     beats = fromIntegral . ceiling . maximum $ map fst notes
@@ -95,12 +96,19 @@ checkSegment tempo (Segment notes) =
                         NoteOn n' _ -> ((toBeats (itime+dt), n'):) <$> go (itime+dt)
                         _ -> go (itime+dt)
 
+metronomeIntro :: Double -> Int -> StreamProc Note Note a -> StreamProc Note Note a
+metronomeIntro tempo beats cont = do
+    mergeInner (mapO (const metronomeTone) (metronome tempo)) 
+               (waitTime (TimeDiff (60 * fromIntegral beats / tempo)))
+    cont
+
 data SegDiff = SegDiff {
     missedNotes :: Int,
     extraNotes :: Int,
     totalNotes :: Int,
     sqrTimingDiff :: Double
 }
+    deriving (Show)
 
 instance Monoid SegDiff where
     mempty = SegDiff 0 0 0 0
@@ -123,7 +131,7 @@ diffSegments' ((mtime,mnote):ms) ns
     | otherwise = mempty { missedNotes = 1 } `mappend` diffSegments' ms ns
     where
     metric (time,note)
-        | note == mnote && diffsq < (1/10)^2 
+        | note == mnote && diffsq < (1/2)^2 
             = Just $ mempty { totalNotes = 1, sqrTimingDiff = diffsq }
         | otherwise = Nothing
         where
