@@ -36,7 +36,15 @@ main = do
     source <- connectInput "UM-ONE"
     dest <- connectOutput "IAC Bus 1"
     MIDI.start source
-    runStreamProc source dest (fromExerciseForm Exercises.cScale)
+    print =<< runStreamProc source dest (fromExerciseForm exercise)
+
+exercise :: S.StreamProc Exercises.Note Exercises.Note Exercises.SegDiff
+exercise = do
+    let target = Exercises.fourNoteArpeggioSegment (Exercises.baseScale 48 Exercises.majorScale)
+    seg <- Exercises.metronomeIntro tempo 8 . Exercises.recordSegment tempo $ target
+    return $ Exercises.diffSegments target seg
+    where
+    tempo = 80
 
 runStreamProc :: MIDI.Connection -> MIDI.Connection -> 
                  S.StreamProc MIDI.MidiMessage MIDI.MidiMessage a -> IO a
