@@ -33,6 +33,9 @@ mapFilterIF f (Return x) = Return x
 waitF :: TimeDiff -> Future i (Maybe i)
 waitF d = Wait d (return . fmap snd)
 
+waitWithTimeF :: TimeDiff -> Future i (Maybe (TimeDiff, i))
+waitWithTimeF d = Wait d return
+
 waitTimeF :: TimeDiff -> Future i ()
 waitTimeF d = Wait d $ \case
     Nothing -> return ()
@@ -92,6 +95,9 @@ fromFuture = Input . fmap return
 
 wait :: TimeDiff -> StreamProc i o (Maybe i)
 wait = fromFuture . waitF
+
+waitWithTime :: TimeDiff -> StreamProc i o (Maybe (TimeDiff, i))
+waitWithTime = fromFuture . waitWithTimeF
 
 waitTime :: TimeDiff -> StreamProc i o ()
 waitTime = fromFuture . waitTimeF

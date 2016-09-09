@@ -73,22 +73,27 @@ invertedFourNoteArpeggioExercise :: Scale -> KeyTraversal -> Exercise
 invertedFourNoteArpeggioExercise scale ktrav = Exercise $
     [ invertedFourNoteArpeggioSegment (baseScale (48 + k) scale) | k <- ktrav ]
 
-
-majorScaleDegrees = [0,2,4,5,7,9,11]
-scaleAt start degrees = 
-    map (+start) degrees ++ [start + (degrees !! 0) + 12] ++ map (+start) (reverse degrees)
-
-cScale :: StreamProc Note Note ()
-cScale = go (scaleAt 60 majorScaleDegrees)
+checkSegment :: Double -> Segment -> StreamProc Note Note Segment
+checkSegment tempo (Segment notes) =
+    mergeInner (mapO (const metronomeTone) (metronome tempo)) $ Segment <$> go 0 
     where
-    go [] = return ()
-    go (n:ns) = do
-        event <- waitForever
-        case event of
-            NoteOn pitch vel | pitch == n -> output (NoteOn pitch vel) >> go ns
-            NoteOff pitch -> output (NoteOff pitch) >> go (n:ns)
-            _ -> go (n:ns)
-
+    metronomeTone = NoteOn 84 100
+    fromBeats beats = 60 * beats / tempo
+    toBeats t = t * tempo / 60
+    beats = fromIntegral . ceiling . maximum $ map fst notes
+    phraseTime = fromBeats beats
+    go !itime
+        | itime >= phraseTime = return []
+        | otherwise = do
+            m <- waitWithTime (TimeDiff (phraseTime - itime))
+            case m of
+                Nothing -> return []
+                Just (TimeDiff dt, n) -> do
+                    output n
+                    case n of
+                        NoteOn n' _ -> ((toBeats (itime+dt), n'):) <$> go (itime+dt)
+                        _ -> go (itime+dt)
+        
 metronome :: Double -> StreamProc i () a
 metronome tempo = forever $ do
     output ()
