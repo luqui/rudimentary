@@ -37,14 +37,19 @@ main = do
     dest <- connectOutput "IAC Bus 1"
     MIDI.start source
     print =<< runStreamProc source dest (fromExerciseForm exercise)
+    --print =<< runStreamProc source dest (fromExerciseForm playEx)
 
 exercise :: S.StreamProc Exercises.Note Exercises.Note Exercises.SegDiff
 exercise = do
     let target = Exercises.fourNoteArpeggioSegment (Exercises.baseScale 48 Exercises.majorScale)
-    seg <- Exercises.metronomeIntro tempo 8 . Exercises.recordSegment tempo $ target
+    seg <- Exercises.metronomeIntro tempo 8 (Exercises.recordSegment tempo target)
     return $ Exercises.diffSegments target seg
     where
     tempo = 80
+
+playEx :: S.StreamProc Exercises.Note Exercises.Note ()
+playEx = Exercises.playSegment 80 $ 
+    Exercises.fourNoteArpeggioSegment (Exercises.baseScale 48 Exercises.majorScale)
 
 runStreamProc :: MIDI.Connection -> MIDI.Connection -> 
                  S.StreamProc MIDI.MidiMessage MIDI.MidiMessage a -> IO a

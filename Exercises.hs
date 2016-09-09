@@ -5,6 +5,7 @@ module Exercises where
 import Control.Monad (forever)
 import Control.Arrow (second)
 import StreamProc
+import Debug.Trace
 import qualified System.Random as Random
 
 data Note 
@@ -96,10 +97,20 @@ recordSegment tempo (Segment notes) =
                         NoteOn n' _ -> ((toBeats (itime+dt), n'):) <$> go (itime+dt)
                         _ -> go (itime+dt)
 
+playSegment :: Double -> Segment -> StreamProc Note Note ()
+playSegment tempo (Segment notes) = go 0 0 notes
+    where
+    go :: Double -> Int -> [(Double, Int)] -> StreamProc Note Note ()
+    go !itime prev [] = output (NoteOff prev)
+    go !itime prev ((t,n):ns)
+        | t <= itime = output (NoteOff prev) >> output (NoteOn n 100) >> go t n ns
+        | otherwise = waitTime (TimeDiff (60*(t - itime)/tempo)) >> output (NoteOff prev) >> output (NoteOn n 100) >> go t n ns
+
 metronomeIntro :: Double -> Int -> StreamProc Note Note a -> StreamProc Note Note a
 metronomeIntro tempo beats cont = do
     mergeInner (mapO (const metronomeTone) (metronome tempo)) 
                (waitTime (TimeDiff (60 * fromIntegral beats / tempo)))
+    trace "Done with metronome intro" $ return ()
     cont
 
 data SegDiff = SegDiff {
