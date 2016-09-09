@@ -3,6 +3,7 @@
 module Exercises where
 
 import Control.Monad (forever)
+import Control.Arrow (second)
 import StreamProc
 import qualified System.Random as Random
 
@@ -93,6 +94,40 @@ checkSegment tempo (Segment notes) =
                     case n of
                         NoteOn n' _ -> ((toBeats (itime+dt), n'):) <$> go (itime+dt)
                         _ -> go (itime+dt)
+
+data SegDiff = SegDiff {
+    missedNotes :: Int,
+    extraNotes :: Int,
+    totalNotes :: Int,
+    sqrTimingDiff :: Double
+}
+
+instance Monoid SegDiff where
+    mempty = SegDiff 0 0 0 0
+    SegDiff a b c d `mappend` SegDiff a' b' c' d' = SegDiff (a+a') (b+b') (c+c') (d+d')
+
+findSplit :: (a -> Maybe b) -> [a] -> Maybe (b, [a])
+findSplit p [] = Nothing
+findSplit p (x:xs) 
+    | Just y <- p x = Just (y, xs)
+    | otherwise     = fmap (second (x:)) (findSplit p xs)
+
+diffSegments :: Segment -> Segment -> SegDiff
+diffSegments (Segment ms) (Segment ns) = diffSegments' ms ns
+
+diffSegments' :: [(Double,Int)] -> [(Double,Int)] -> SegDiff
+diffSegments' [] ns = mempty { extraNotes = length ns }
+diffSegments' ms [] = mempty { missedNotes = length ms }
+diffSegments' ((mtime,mnote):ms) ns
+    | Just (d,ns') <- findSplit metric ns = d `mappend` diffSegments' ms ns'
+    | otherwise = mempty { missedNotes = 1 } `mappend` diffSegments' ms ns
+    where
+    metric (time,note)
+        | note == mnote && diffsq < (1/10)^2 
+            = Just $ mempty { totalNotes = 1, sqrTimingDiff = diffsq }
+        | otherwise = Nothing
+        where
+        diffsq = (time-mtime)^2
         
 metronome :: Double -> StreamProc i () a
 metronome tempo = forever $ do
