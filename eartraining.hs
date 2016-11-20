@@ -3,6 +3,7 @@
 module Main where
 
 import Control.Applicative
+import Control.Arrow (second)
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, filterM, when)
 import Control.Monad.Trans (liftIO)
@@ -18,10 +19,6 @@ import qualified Text.Parsec.Token as P
 
 type Parser = P.Parsec String ()
 
-data ScaleGenus
-    = Natural
-    | Melodic
-    deriving (Eq, Ord, Read, Show, Bounded, Enum)
 
 tok = P.makeTokenParser $ P.LanguageDef {
         P.commentStart = "",
@@ -36,6 +33,11 @@ tok = P.makeTokenParser $ P.LanguageDef {
         P.reservedOpNames = [],
         P.caseSensitive = True 
     }
+
+data ScaleGenus
+    = Natural
+    | Melodic
+    deriving (Eq, Ord, Read, Show, Bounded, Enum)
 
 genusParser :: Parser ScaleGenus
 genusParser = P.choice [Natural <$ P.symbol tok "nat", Melodic <$ P.symbol tok "mel"]
@@ -69,6 +71,7 @@ noteName (Note i) = noteMap Map.! i
 
 instance Show Note where show = noteName
 
+
 noteParser :: Parser Note
 noteParser = do
     i <- P.choice [ i <$ (P.symbol tok (map Char.toUpper n) <|> P.symbol tok (map Char.toLower n))
@@ -93,9 +96,12 @@ scaleParser = do
 parseScale :: String -> Either P.ParseError Scale
 parseScale = P.parse scaleParser "<input>"
 
-
 renderScale :: Scale -> [Int]
 renderScale (Scale (Note note0) scaleType) = scanl (+) (60+note0) (modeIntervals scaleType)
+
+
+
+
 
 data Game = Game {
     playC4 :: IO (),
@@ -112,26 +118,28 @@ startGame = do
 
 scaleGameReal :: MIDI.Connection -> IO ()
 scaleGameReal conn = do
-    genus <- choice [minBound..maxBound]
+    genus <- return Melodic --choice [minBound..maxBound]
     mode <- randomRIO (1, genusSize genus)
-    startNote <- Note <$> randomRIO (0,11)
+    startNote <- return $ Note 0 -- Note <$> randomRIO (0,11)
     octave <- randomRIO (-1,1)
     let scale = Scale startNote (Mode genus mode)
-    RL.runInputT RL.defaultSettings (iter octave scale conn)
+    let rendered@(firstNote:_) = renderScale scale
+    notes <- (12*octave + firstNote:) <$> randPerm (map (+ (12*octave)) (renderScale scale))
+    RL.runInputT RL.defaultSettings (iter scale notes conn)
     where
-    iter octave scale conn = do
-        liftIO $ playNotes 0.25 (map (+ (12*octave)) (renderScale scale)) conn
+    iter scale notes conn = do
+        liftIO $ playNotes 0.5 notes conn
         liftIO $ putStrLn "Enter an expression to guess, 'r' to repeat, 'ref' for reference tone"
         Just ans <- RL.getInputLine "> "
         case ans of
-            "r" -> iter octave scale conn
-            "ref" -> liftIO (putStrLn "C" >> playNotes 1 [60] conn) >> iter octave scale conn
+            "r" -> iter scale notes conn
+            "ref" -> liftIO (putStrLn "C" >> playNotes 1 [60] conn) >> iter scale notes conn
             _ -> do
                 case parseScale ans of
-                    Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter octave scale conn
+                    Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter scale notes conn
                     Right exp -> if exp == scale 
-                                 then liftIO $ putStrLn "Correct!" >> playNotes 0.25 (renderScale scale) conn
-                                 else liftIO (putStrLn "Incorrect!") >> iter octave scale conn
+                                 then liftIO $ putStrLn "Correct!" >> playNotes 0.25 notes conn
+                                 else liftIO (putStrLn "Incorrect!") >> iter scale notes conn
     
 
 connectOutput :: String -> IO MIDI.Connection
@@ -150,9 +158,20 @@ playNotes dt notes conn = do
         MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOff note 0))
 
 choice :: [a] -> IO a
+choice [] = error "choice []"
 choice xs = do
     i <- randomRIO (0, length xs-1)
     return $ xs !! i
 
 maybeRead :: (Read a) => String -> Maybe a
 maybeRead s = listToMaybe [ x | (x,"") <- reads s ]
+
+randPerm :: [a] -> IO [a]
+randPerm [] = return []
+randPerm xs = do
+    (s,ss) <- choice (selects xs)
+    (s:) <$> randPerm ss
+
+selects :: [a] -> [(a, [a])]
+selects [] = []
+selects (x:xs) = (x,xs) : (map.second) (x:) (selects xs)
