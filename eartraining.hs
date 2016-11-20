@@ -2,30 +2,53 @@
 
 module Main where
 
+import Control.Applicative
 import Control.Concurrent (threadDelay)
-import Control.Monad (forM_, filterM)
+import Control.Monad (forM_, filterM, when)
 import Control.Monad.Trans (liftIO)
 import Data.Maybe (listToMaybe)
 import Data.Tuple (swap)
 import System.Random (randomRIO)
+import qualified Data.Char as Char
 import qualified Data.Map as Map
 import qualified System.Console.Haskeline as RL
 import qualified System.MIDI as MIDI
+import qualified Text.Parsec as P
+import qualified Text.Parsec.Token as P
+
+type Parser = P.Parsec String ()
 
 data ScaleGenus
-    = Major
+    = Natural
     | Melodic
     deriving (Eq, Ord, Read, Show, Bounded, Enum)
 
+tok = P.makeTokenParser $ P.LanguageDef {
+        P.commentStart = "",
+        P.commentEnd = "",
+        P.commentLine = "",
+        P.nestedComments = False,
+        P.identStart = fail "no identifiers",
+        P.identLetter = fail "no identifiers",
+        P.opStart = fail "no operators",
+        P.opLetter = fail "no operators",
+        P.reservedNames = [],
+        P.reservedOpNames = [],
+        P.caseSensitive = True 
+    }
+
+genusParser :: Parser ScaleGenus
+genusParser = P.choice [Natural <$ P.symbol tok "nat", Melodic <$ P.symbol tok "mel"]
+
 genusIntervals :: ScaleGenus -> [Int]
-genusIntervals Major = [2,1,2,2,2,1,2]   -- dorian, the center
+genusIntervals Natural = [2,1,2,2,2,1,2]   -- dorian, the center
 genusIntervals Melodic = [2,2,1,2,1,2,2] -- major-minor
 
 genusSize :: ScaleGenus -> Int
 genusSize = length . genusIntervals
 
 data Mode = Mode ScaleGenus Int  -- 1-based mode
-    deriving (Eq, Ord, Read, Show)
+    deriving (Eq, Ord, Show)
 
 modeIntervals :: Mode -> [Int]
 modeIntervals (Mode g m) = trunc intervals (drop (m-1) (cycle (genusIntervals g)))
@@ -46,19 +69,30 @@ noteName (Note i) = noteMap Map.! i
 
 instance Show Note where show = noteName
 
-parseNote :: String -> [(Note, String)]
-parseNote (n:'b':s)
-    | Just t <- Map.lookup [n] (Map.fromList baseNoteNames) = [(Note ((t-1) `mod` 12), s)]
-parseNote (n:'#':s)
-    | Just t <- Map.lookup [n] (Map.fromList baseNoteNames) = [(Note ((t+1) `mod` 12), s)]
-parseNote (n:s)
-    | Just t <- Map.lookup [n] (Map.fromList baseNoteNames) = [(Note t,s)]
-parseNote _ = []
-
-instance Read Note where readsPrec _ = parseNote
+noteParser :: Parser Note
+noteParser = do
+    i <- P.choice [ i <$ (P.symbol tok (map Char.toUpper n) <|> P.symbol tok (map Char.toLower n))
+                  | (n,i) <- baseNoteNames ]
+    acc <- P.choice [
+        length <$> P.many1 (P.symbol tok "#"),
+        negate . length <$> P.many1 (P.symbol tok "b"),
+        return 0 ]
+    return . Note $ (i + acc) `mod` 12
 
 data Scale = Scale Note Mode
-    deriving (Eq, Ord, Read, Show)
+    deriving (Eq, Ord, Show)
+
+scaleParser :: Parser Scale
+scaleParser = do
+    baseNote <- noteParser
+    genus <- genusParser
+    mode <- fromIntegral <$> P.integer tok
+    when (mode < 1 || mode > genusSize genus) $ fail "Invalid mode"
+    return $ Scale baseNote (Mode genus mode)
+
+parseScale :: String -> Either P.ParseError Scale
+parseScale = P.parse scaleParser "<input>"
+
 
 renderScale :: Scale -> [Int]
 renderScale (Scale (Note note0) scaleType) = scanl (+) (60+note0) (modeIntervals scaleType)
@@ -80,22 +114,24 @@ scaleGameReal :: MIDI.Connection -> IO ()
 scaleGameReal conn = do
     genus <- choice [minBound..maxBound]
     mode <- randomRIO (1, genusSize genus)
-    let startNote = Note 0
+    startNote <- Note <$> randomRIO (0,11)
+    octave <- randomRIO (-1,1)
     let scale = Scale startNote (Mode genus mode)
-    RL.runInputT RL.defaultSettings (iter scale conn)
+    RL.runInputT RL.defaultSettings (iter octave scale conn)
     where
-    iter scale conn = do
-        liftIO $ playNotes 0.25 (renderScale scale) conn
-        liftIO $ putStrLn "Enter an expression to guess or 'r' to repeat"
+    iter octave scale conn = do
+        liftIO $ playNotes 0.25 (map (+ (12*octave)) (renderScale scale)) conn
+        liftIO $ putStrLn "Enter an expression to guess, 'r' to repeat, 'ref' for reference tone"
         Just ans <- RL.getInputLine "> "
-        if ans == "r"
-            then iter scale conn
-            else do
-                case maybeRead ans of
-                    Nothing -> liftIO (putStrLn "Parse error") >> iter scale conn
-                    Just e -> if e == scale 
+        case ans of
+            "r" -> iter octave scale conn
+            "ref" -> liftIO (putStrLn "C" >> playNotes 1 [60] conn) >> iter octave scale conn
+            _ -> do
+                case parseScale ans of
+                    Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter octave scale conn
+                    Right exp -> if exp == scale 
                                  then liftIO $ putStrLn "Correct!" >> playNotes 0.25 (renderScale scale) conn
-                                 else liftIO (putStrLn "Incorrect!") >> iter scale conn
+                                 else liftIO (putStrLn "Incorrect!") >> iter octave scale conn
     
 
 connectOutput :: String -> IO MIDI.Connection
