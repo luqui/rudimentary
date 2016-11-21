@@ -91,7 +91,7 @@ scaleParser :: Parser Scale
 scaleParser = do
     baseNote <- noteParser
     genus <- genusParser
-    mode <- fromIntegral <$> P.integer tok
+    mode <- fromIntegral <$> P.natural tok
     when (mode < 1 || mode > genusSize genus) $ fail "Invalid mode"
     return $ Scale baseNote (Mode genus mode)
 
@@ -99,7 +99,7 @@ parseScale :: String -> Either P.ParseError Scale
 parseScale = P.parse scaleParser "<input>"
 
 renderScale :: Scale -> [Int]
-renderScale (Scale (Note note0) scaleType) = scanl (+) (60+note0) (modeIntervals scaleType)
+renderScale (Scale (Note note0) scaleType) = init $ scanl (+) (60+note0) (modeIntervals scaleType)
 
 
 data Degree 
@@ -112,7 +112,7 @@ shift (Degree a acca) (Degree b accb) = Degree (a+b) (acca+accb)
 
 degreeParser :: Parser Degree
 degreeParser = P.choice [
-    flip Degree <$> accidentalParser <*> (subtract 1 . fromIntegral <$> P.integer tok),
+    flip Degree <$> accidentalParser <*> (subtract 1 . fromIntegral <$> P.natural tok),
     Rest <$ P.symbol tok "~" ]
     where
     deg = do
@@ -134,13 +134,13 @@ invert :: Degree -> Degree
 invert (Degree a acc) = Degree (negate a) (negate acc)
 
 applyScale :: [Int] -> Degree -> Int
-applyScale scale (Degree deg acc) = (scale !! (deg `mod` len)) + acc
+applyScale scale (Degree deg acc) = (scale !! (deg `mod` len)) + 12 * (deg `div` len) + acc
     where
     len = length scale
+    
 
 data DegreeExp 
     = DERun [Degree]
-    | DEApply DegreeExp DegreeExp
     | DEMult DegreeExp DegreeExp
     | DEConcat DegreeExp DegreeExp
     | DEOp DegreeOperator
@@ -157,57 +157,31 @@ degreeExpParser = catExp
     where
     atomic = P.choice [
         P.parens tok degreeExpParser,
-        DERun <$> degreeRunParser ]
-    opExp = P.choice [
-        DEApply <$> operator <*> atomic,
-        atomic ]
-    mulExp = flip ($) <$> opExp <*> P.option id ((flip DEMult <$ P.symbol tok "<>") <*> mulExp)
-    catExp = flip ($) <$> mulExp <*> P.option id ((flip DEConcat <$ P.symbol tok "+") <*> catExp)
+        DERun <$> degreeRunParser,
+        DEOp <$> operator ]
+    opExp = binOp (pure DEMult) atomic
+    mulExp = binOp (DEMult <$ P.symbol tok "<>") opExp
+    catExp = binOp (DEConcat <$ P.symbol tok "+") mulExp
+    binOp op p = flip ($) <$> p <*> P.option id (flip <$> op <*> binOp op p)
     operator = P.choice [
-        DEOp DOIdentity <$ P.symbol tok "Id",
-        DEOp DOInvert <$ P.symbol tok "Inv",
-        DEOp DORetrograde <$ P.symbol tok "Ret" ]
+        P.try (DOIdentity <$ P.symbol tok "Id"),
+        P.try (DOInvert <$ P.symbol tok "Inv"),
+        P.try (DORetrograde <$ P.symbol tok "Ret") ]
 
-data DEVal
-    = DVRun [Degree]
-    | DVOp ([Degree] -> [Degree])
-
-interpDegreeExp :: DegreeExp -> Maybe [Degree]
-interpDegreeExp = toRun <=< go
+interpDegreeExp :: DegreeExp -> [Degree]
+interpDegreeExp = ($ [Degree 0 0]) . go
     where
-    go (DERun run) = return (DVRun run)
-    go (DEApply f x) = do
-        f' <- go f
-        x' <- go x
-        case (f', x') of
-            (DVRun _, _) -> fail "Can't use a run as an operator"
-            (DVOp op, DVRun run) -> return (DVRun (op run))
-            (DVOp op, DVOp op') -> return (DVOp (op . op'))
-    go (DEMult a b) = do
-        a' <- go a
-        b' <- go b
-        case (a', b') of
-            (DVRun arun, DVRun brun) -> return (DVRun (arun <> brun))
-            (DVOp aop, DVOp bop) -> return (DVOp (liftA2 (<>) aop bop))
-            _ -> fail "Incompatible arguments to <>"
-    go (DEConcat a b) = do
-        a' <- go a
-        b' <- go b
-        case (a', b') of
-            (DVRun arun, DVRun brun) -> return (DVRun (arun ++ brun))
-            (DVOp aop, DVOp bop) -> return (DVOp (liftA2 (++) aop bop))
-            _ -> fail "Incompatible arguments to +"
-    go (DEOp DOIdentity) = return (DVOp id)
-    go (DEOp DOInvert) = return (DVOp (map invert))
-    go (DEOp DORetrograde) = return (DVOp reverse)
-
-    toRun (DVRun run) = return run
-    toRun (DVOp op) = fail "Cannot convert an operator to a run"
+    go (DERun run) = (run <>)
+    go (DEMult f g) = go f . go g
+    go (DEConcat f g) = liftA2 (++) (go f) (go g)
+    go (DEOp DOIdentity) = id
+    go (DEOp DOInvert) = map invert
+    go (DEOp DORetrograde) = reverse
     
 
 expParser :: Parser [Int]
 expParser = (map . applyScale . renderScale <$> scaleParser) 
-        <*> unMaybe (interpDegreeExp <$> degreeExpParser)
+        <*> (interpDegreeExp <$> degreeExpParser)
     where
     unMaybe p = p >>= maybe (fail "Nothing") return
 
@@ -232,7 +206,7 @@ scaleGameReal conn = do
     startNote <- return $ Note 0 -- Note <$> randomRIO (0,11)
     octave <- randomRIO (-1,1)
     let scale = Scale startNote (Mode genus mode)
-    let rendered@(firstNote:_) = renderScale scale
+    let rendered@(firstNote:_) = renderScale scale ++ [firstNote+12]
     notes <- (12*octave + firstNote:) <$> randPerm (map (+ (12*octave)) (renderScale scale))
     RL.runInputT RL.defaultSettings (iter scale notes conn)
     where
