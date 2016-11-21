@@ -108,6 +108,8 @@ data Degree
     deriving (Eq, Ord, Show)
 
 shift :: Degree -> Degree -> Degree
+shift Rest _ = Rest
+shift _ Rest = Rest
 shift (Degree a acca) (Degree b accb) = Degree (a+b) (acca+accb)
 
 degreeParser :: Parser Degree
@@ -137,6 +139,7 @@ applyScale :: [Int] -> Degree -> Int
 applyScale scale (Degree deg acc) = (scale !! (deg `mod` len)) + 12 * (deg `div` len) + acc
     where
     len = length scale
+applyScale _ Rest = 0
     
 
 data DegreeExp 
@@ -236,9 +239,9 @@ connectOutput destName = do
 playNotes :: Double -> [Int] -> MIDI.Connection -> IO ()
 playNotes dt notes conn = do
     forM_ notes $ \note -> do
-        MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOn note 64))
+        when (note /= 0) $ MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOn note 64))
         threadDelay (floor (10^6 * dt))
-        MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOff note 0))
+        when (note /= 0) $ MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOff note 0))
 
 choice :: [a] -> IO a
 choice [] = error "choice []"
