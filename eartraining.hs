@@ -5,7 +5,7 @@ module Main where
 import Control.Applicative
 import Control.Arrow (second)
 import Control.Concurrent (threadDelay)
-import Control.Monad (forM_, filterM, when)
+import Control.Monad (forM_, filterM, when, (<=<))
 import Control.Monad.Trans (liftIO)
 import Data.Maybe (listToMaybe)
 import Data.Tuple (swap)
@@ -71,15 +71,17 @@ noteName (Note i) = noteMap Map.! i
 
 instance Show Note where show = noteName
 
+accidentalParser :: Parser Int
+accidentalParser = P.choice [
+    length <$> P.many1 (P.symbol tok "#"),
+    negate . length <$> P.many1 (P.symbol tok "b"),
+    return 0 ]
 
 noteParser :: Parser Note
 noteParser = do
     i <- P.choice [ i <$ (P.symbol tok (map Char.toUpper n) <|> P.symbol tok (map Char.toLower n))
                   | (n,i) <- baseNoteNames ]
-    acc <- P.choice [
-        length <$> P.many1 (P.symbol tok "#"),
-        negate . length <$> P.many1 (P.symbol tok "b"),
-        return 0 ]
+    acc <- accidentalParser
     return . Note $ (i + acc) `mod` 12
 
 data Scale = Scale Note Mode
@@ -100,7 +102,114 @@ renderScale :: Scale -> [Int]
 renderScale (Scale (Note note0) scaleType) = scanl (+) (60+note0) (modeIntervals scaleType)
 
 
+data Degree 
+    = Degree Int Int   -- degree(0-based) accidental
+    | Rest
+    deriving (Eq, Ord, Show)
 
+shift :: Degree -> Degree -> Degree
+shift (Degree a acca) (Degree b accb) = Degree (a+b) (acca+accb)
+
+degreeParser :: Parser Degree
+degreeParser = P.choice [
+    flip Degree <$> accidentalParser <*> (subtract 1 . fromIntegral <$> P.integer tok),
+    Rest <$ P.symbol tok "~" ]
+    where
+    deg = do
+        i <- P.integer tok 
+        when (i < 0) $ fail "degrees cannot be zero"
+        return $ signum i * (abs i - 1)
+
+degreeRunParser :: Parser [Degree]
+degreeRunParser = P.choice [
+    degreeParser `P.sepBy1` P.symbol tok ",",
+    map (`Degree` 0) [0,1..7] <$ P.symbol tok "asc",
+    map (`Degree` 0) [7,6..0] <$ P.symbol tok "desc" ]
+
+
+(<>) :: [Degree] -> [Degree] -> [Degree]
+lh <> rh = concatMap (\l -> map (shift l) rh) lh
+
+invert :: Degree -> Degree
+invert (Degree a acc) = Degree (negate a) (negate acc)
+
+applyScale :: [Int] -> Degree -> Int
+applyScale scale (Degree deg acc) = (scale !! (deg `mod` len)) + acc
+    where
+    len = length scale
+
+data DegreeExp 
+    = DERun [Degree]
+    | DEApply DegreeExp DegreeExp
+    | DEMult DegreeExp DegreeExp
+    | DEConcat DegreeExp DegreeExp
+    | DEOp DegreeOperator
+    deriving (Show)
+
+data DegreeOperator
+    = DOIdentity
+    | DOInvert
+    | DORetrograde
+    deriving (Show)
+
+degreeExpParser :: Parser DegreeExp
+degreeExpParser = catExp
+    where
+    atomic = P.choice [
+        P.parens tok degreeExpParser,
+        DERun <$> degreeRunParser ]
+    opExp = P.choice [
+        DEApply <$> operator <*> atomic,
+        atomic ]
+    mulExp = flip ($) <$> opExp <*> P.option id ((flip DEMult <$ P.symbol tok "<>") <*> mulExp)
+    catExp = flip ($) <$> mulExp <*> P.option id ((flip DEConcat <$ P.symbol tok "+") <*> catExp)
+    operator = P.choice [
+        DEOp DOIdentity <$ P.symbol tok "Id",
+        DEOp DOInvert <$ P.symbol tok "Inv",
+        DEOp DORetrograde <$ P.symbol tok "Ret" ]
+
+data DEVal
+    = DVRun [Degree]
+    | DVOp ([Degree] -> [Degree])
+
+interpDegreeExp :: DegreeExp -> Maybe [Degree]
+interpDegreeExp = toRun <=< go
+    where
+    go (DERun run) = return (DVRun run)
+    go (DEApply f x) = do
+        f' <- go f
+        x' <- go x
+        case (f', x') of
+            (DVRun _, _) -> fail "Can't use a run as an operator"
+            (DVOp op, DVRun run) -> return (DVRun (op run))
+            (DVOp op, DVOp op') -> return (DVOp (op . op'))
+    go (DEMult a b) = do
+        a' <- go a
+        b' <- go b
+        case (a', b') of
+            (DVRun arun, DVRun brun) -> return (DVRun (arun <> brun))
+            (DVOp aop, DVOp bop) -> return (DVOp (liftA2 (<>) aop bop))
+            _ -> fail "Incompatible arguments to <>"
+    go (DEConcat a b) = do
+        a' <- go a
+        b' <- go b
+        case (a', b') of
+            (DVRun arun, DVRun brun) -> return (DVRun (arun ++ brun))
+            (DVOp aop, DVOp bop) -> return (DVOp (liftA2 (++) aop bop))
+            _ -> fail "Incompatible arguments to +"
+    go (DEOp DOIdentity) = return (DVOp id)
+    go (DEOp DOInvert) = return (DVOp (map invert))
+    go (DEOp DORetrograde) = return (DVOp reverse)
+
+    toRun (DVRun run) = return run
+    toRun (DVOp op) = fail "Cannot convert an operator to a run"
+    
+
+expParser :: Parser [Int]
+expParser = (map . applyScale . renderScale <$> scaleParser) 
+        <*> unMaybe (interpDegreeExp <$> degreeExpParser)
+    where
+    unMaybe p = p >>= maybe (fail "Nothing") return
 
 
 data Game = Game {
@@ -118,7 +227,7 @@ startGame = do
 
 scaleGameReal :: MIDI.Connection -> IO ()
 scaleGameReal conn = do
-    genus <- return Melodic --choice [minBound..maxBound]
+    genus <- choice [Natural, Melodic]
     mode <- randomRIO (1, genusSize genus)
     startNote <- return $ Note 0 -- Note <$> randomRIO (0,11)
     octave <- randomRIO (-1,1)
