@@ -134,6 +134,7 @@ lh <> rh = concatMap (\l -> map (shift l) rh) lh
 
 invert :: Degree -> Degree
 invert (Degree a acc) = Degree (negate a) (negate acc)
+invert Rest = Rest
 
 applyScale :: [Int] -> Degree -> Int
 applyScale scale (Degree deg acc) = (scale !! (deg `mod` len)) + 12 * (deg `div` len) + acc
