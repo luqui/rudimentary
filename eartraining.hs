@@ -57,18 +57,24 @@ class Pretty a where
 data ScaleGenus
     = Natural
     | Melodic
+    | Diminished
     deriving (Eq, Ord, Read, Show, Bounded, Enum)
 
 instance Pretty ScaleGenus where
     pretty Natural = "nat"
     pretty Melodic = "mel"
+    pretty Diminished = "dim"
 
 genusParser :: Parser ScaleGenus
-genusParser = P.choice [Natural <$ P.symbol tok "nat", Melodic <$ P.symbol tok "mel"]
+genusParser = P.choice [
+    Natural <$ P.symbol tok "nat",
+    Melodic <$ P.symbol tok "mel",
+    Diminished <$ P.symbol tok "dim" ]
 
 genusIntervals :: ScaleGenus -> [Int]
-genusIntervals Natural = [2,1,2,2,2,1,2]   -- dorian, the center
-genusIntervals Melodic = [2,2,1,2,1,2,2] -- major-minor
+genusIntervals Natural = [2,1,2,2,2,1,2]      -- dorian, the center
+genusIntervals Melodic = [2,2,1,2,1,2,2]      -- major-minor
+genusIntervals Diminished = [2,1,2,1,2,1,2,1] -- 2-1 (diminished does not have a center mode!)
 
 genusSize :: ScaleGenus -> Int
 genusSize = length . genusIntervals
