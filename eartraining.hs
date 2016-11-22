@@ -1,12 +1,13 @@
-{-# LANGUAGE RecordWildCards, LambdaCase #-}
+{-# LANGUAGE RecordWildCards, LambdaCase, TupleSections, BangPatterns #-}
 
 module Main where
 
 import Control.Applicative
 import Control.Arrow (second)
 import Control.Concurrent (threadDelay)
-import Control.Monad (forM_, filterM, when, (<=<))
+import Control.Monad (forM_, filterM, when, (<=<), join)
 import Control.Monad.Trans (liftIO)
+import Data.List (isPrefixOf, intercalate)
 import Data.Maybe (listToMaybe)
 import Data.Tuple (swap)
 import System.Random (randomRIO)
@@ -16,6 +17,22 @@ import qualified System.Console.Haskeline as RL
 import qualified System.MIDI as MIDI
 import qualified Text.Parsec as P
 import qualified Text.Parsec.Token as P
+import qualified Control.Monad.Random as Rand
+
+type Dist = Rand.Rand Rand.StdGen
+
+dist :: [(Double, a)] -> Dist a
+dist choices = do
+    x <- Rand.getRandomR (0, sum (map fst choices))
+    let choose accum [] = error "no choices"
+        choose accum ((p,a):as)
+            | x <= accum + p  = return a
+            | otherwise       = choose (accum+p) as
+    choose 0 choices
+
+uniform :: [a] -> Dist a
+uniform = dist . map (1,)
+
 
 type Parser = P.Parsec String ()
 
@@ -34,10 +51,17 @@ tok = P.makeTokenParser $ P.LanguageDef {
         P.caseSensitive = True 
     }
 
+class Pretty a where
+    pretty :: a -> String
+
 data ScaleGenus
     = Natural
     | Melodic
     deriving (Eq, Ord, Read, Show, Bounded, Enum)
+
+instance Pretty ScaleGenus where
+    pretty Natural = "nat"
+    pretty Melodic = "mel"
 
 genusParser :: Parser ScaleGenus
 genusParser = P.choice [Natural <$ P.symbol tok "nat", Melodic <$ P.symbol tok "mel"]
@@ -52,6 +76,9 @@ genusSize = length . genusIntervals
 data Mode = Mode ScaleGenus Int  -- 1-based mode
     deriving (Eq, Ord, Show)
 
+instance Pretty Mode where
+    pretty (Mode g n) = pretty g ++ " " ++ show n
+
 modeIntervals :: Mode -> [Int]
 modeIntervals (Mode g m) = trunc intervals (drop (m-1) (cycle (genusIntervals g)))
     where
@@ -59,7 +86,10 @@ modeIntervals (Mode g m) = trunc intervals (drop (m-1) (cycle (genusIntervals g)
     trunc = zipWith (const id)
 
 newtype Note = Note Int
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
+
+instance Pretty Note where
+    pretty = noteName
 
 baseNoteNames :: [(String, Int)]
 baseNoteNames = [("C", 0), ("D", 2), ("E", 4), ("F", 5), ("G", 7), ("A", 9), ("B", 11)]
@@ -68,8 +98,6 @@ noteName :: Note -> String
 noteName (Note i) = noteMap Map.! i
     where
     noteMap = Map.fromList . map swap $ [ (name ++ "#", note+1) | (name,note) <- baseNoteNames ] ++ baseNoteNames
-
-instance Show Note where show = noteName
 
 accidentalParser :: Parser Int
 accidentalParser = P.choice [
@@ -86,6 +114,9 @@ noteParser = do
 
 data Scale = Scale Note Mode
     deriving (Eq, Ord, Show)
+
+instance Pretty Scale where
+    pretty (Scale n m) = pretty n ++ " " ++ pretty m
 
 scaleParser :: Parser Scale
 scaleParser = do
@@ -106,6 +137,12 @@ data Degree
     = Degree Int Int   -- degree(0-based) accidental
     | Rest
     deriving (Eq, Ord, Show)
+
+instance Pretty Degree where
+    pretty (Degree n acc) = showacc ++ show (1+n)
+        where
+        showacc | acc < 0 = replicate (-acc) 'b'
+                | acc >= 0 = replicate acc '#'
 
 shift :: Degree -> Degree -> Degree
 shift Rest _ = Rest
@@ -150,11 +187,22 @@ data DegreeExp
     | DEOp DegreeOperator
     deriving (Show)
 
+instance Pretty DegreeExp where
+    pretty (DERun ds) = intercalate "," (map pretty ds)
+    pretty (DEMult a b) = pretty a ++ " " ++ pretty b
+    pretty (DEConcat a b) = "(" ++ pretty a ++ " + " ++ pretty b ++ ")"
+    pretty (DEOp op) = pretty op
+
 data DegreeOperator
     = DOIdentity
     | DOInvert
     | DORetrograde
     deriving (Show)
+
+instance Pretty DegreeOperator where
+    pretty DOIdentity = "Id"
+    pretty DOInvert = "Inv"
+    pretty DORetrograde = "Ret"
 
 degreeExpParser :: Parser DegreeExp
 degreeExpParser = catExp
@@ -183,50 +231,104 @@ interpDegreeExp = ($ [Degree 0 0]) . go
     go (DEOp DORetrograde) = reverse
     
 
-expParser :: Parser [Int]
-expParser = (map . applyScale . renderScale <$> scaleParser) 
-        <*> (interpDegreeExp <$> degreeExpParser)
-    where
-    unMaybe p = p >>= maybe (fail "Nothing") return
+data Exp = Exp Scale DegreeExp
+    deriving (Show)
+
+instance Pretty Exp where
+    pretty (Exp scale de) = pretty scale ++ " " ++ pretty de
+
+expParser :: Parser Exp
+expParser = Exp <$> scaleParser <*> degreeExpParser
+
+evalExp :: Exp -> [Int]
+evalExp (Exp scale degexp) = map (applyScale (renderScale scale)) (interpDegreeExp degexp)
 
 
 data Game = Game {
     playC4 :: IO (),
-    scaleGame :: IO ()
+    game :: Dist Exp -> Double -> IO (),
+    audition :: String -> Double -> IO ()
 }
+
 
 startGame :: IO Game
 startGame = do
     dest <- connectOutput "IAC Bus 1"
     return $ Game {
         playC4 = playNotes 1 [60] dest,
-        scaleGame = scaleGameReal dest
+        game = gameFromSchema dest,
+        audition = \inp tempo -> case P.parse expParser "<input>" inp of
+            Right exp -> playNotes (15/tempo) (evalExp exp) dest
+            Left err -> print err
     }
 
-scaleGameReal :: MIDI.Connection -> IO ()
-scaleGameReal conn = do
-    genus <- choice [Natural, Melodic]
-    mode <- randomRIO (1, genusSize genus)
-    startNote <- return $ Note 0 -- Note <$> randomRIO (0,11)
-    octave <- randomRIO (-1,1)
-    let scale = Scale startNote (Mode genus mode)
-    let rendered@(firstNote:_) = renderScale scale ++ [firstNote+12]
-    notes <- (12*octave + firstNote:) <$> randPerm (map (+ (12*octave)) (renderScale scale))
-    RL.runInputT RL.defaultSettings (iter scale notes conn)
+getLevel :: String -> Dist Exp
+getLevel s
+    | Just level <- lookup s levels = level
+    | otherwise = error "No such level"
+
+levels :: [(String, Dist Exp)]
+levels = [
+    "Natural Modes of C" --> Exp <$> (Scale <$> pure (Note 0) <*> naturalMode) <*> asc,
+    "Melodic Modes of C" --> Exp <$> (Scale <$> pure (Note 0) <*> melodicMode) <*> asc,
+    "Modes of C"         --> 
+        Exp <$> (Scale <$> pure (Note 0) <*> join (uniform [naturalMode, melodicMode])) <*> asc,
+
+    "Patterns in C major" --> Exp <$> pure (Scale (Note 0) (Mode Natural 7)) <*> (fancyPattern 4 16)
+    ]
     where
-    iter scale notes conn = do
-        liftIO $ playNotes 0.5 notes conn
-        liftIO $ putStrLn "Enter an expression to guess, 'r' to repeat, 'ref' for reference tone"
+    infix 1 -->
+    (-->) = (,)
+
+    asc = pure (DERun (map (`Degree` 0) [0..7]))
+    naturalMode = Mode <$> pure Natural <*> uniform [1..7]
+    melodicMode = Mode <$> pure Melodic <*> uniform [1..7]
+
+    pattern = join $ uniform [
+        DERun . (:[]) . (`Degree` 0) <$> uniform [0..7],
+        pure $ DEOp DOInvert,
+        pure $ DEOp DORetrograde,
+        DEConcat <$> pattern <*> pattern,
+        DEMult <$> pattern <*> pattern
+        ]
+    fancyPattern lo hi = do
+        p <- pattern
+        if checkLength lo hi (interpDegreeExp p) && length (pretty p) < 60 then return p else fancyPattern lo hi
+
+
+checkLength :: Int -> Int -> [a] -> Bool
+checkLength !lo !hi [] = lo <= 0
+checkLength !lo !hi (x:xs) 
+    | hi > 0 = checkLength (lo-1) (hi-1) xs
+    | otherwise = False
+
+
+gameFromSchema :: MIDI.Connection -> Dist Exp -> Double -> IO ()
+gameFromSchema conn expdist tempo = do
+    exp <- Rand.evalRandIO expdist
+    let notes = evalExp exp
+    play notes
+    RL.runInputT RL.defaultSettings (iter exp notes)
+    where
+    play notes = playNotes delay notes conn
+    iter exp notes = do
+        liftIO $ putStrLn "Enter an expression to guess, or 'r', 'slow', 'ref'"
         Just ans <- RL.getInputLine "> "
         case ans of
-            "r" -> iter scale notes conn
-            "ref" -> liftIO (putStrLn "C" >> playNotes 1 [60] conn) >> iter scale notes conn
-            _ -> do
-                case parseScale ans of
-                    Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter scale notes conn
-                    Right exp -> if exp == scale 
-                                 then liftIO $ putStrLn "Correct!" >> playNotes 0.25 notes conn
-                                 else liftIO (putStrLn "Incorrect!") >> iter scale notes conn
+            "r" -> liftIO (play notes) >> iter exp notes
+            "slow" -> liftIO (playNotes (2*delay) notes conn) >> iter exp notes
+            "ref" -> liftIO (putStrLn "C" >> playNotes 1 [60] conn) >> iter exp notes
+            _ | "audition " `isPrefixOf` ans -> 
+                case P.parse expParser "<audition>" (drop (length "audition ") ans) of
+                    Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
+                    Right exp' -> liftIO (playNotes (15/tempo) (evalExp exp') conn) >> iter exp notes
+              | otherwise ->
+                case P.parse expParser "<input>" ans of
+                    Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
+                    Right exp' -> if evalExp exp' == notes
+                                 then liftIO $ putStrLn ("Correct: " ++ pretty exp)  >> play notes
+                                 else liftIO (putStrLn "Incorrect!") >> iter exp notes
+    delay = 15/tempo -- the length of a sixteenth note
     
 
 connectOutput :: String -> IO MIDI.Connection
