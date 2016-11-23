@@ -160,10 +160,26 @@ instance Pretty Scale where
 scaleParser :: Parser Scale
 scaleParser = do
     baseNote <- noteParser
-    genus <- genusParser
-    mode <- fromIntegral <$> P.natural tok
-    when (mode < 1 || mode > genusSize genus) $ fail "Invalid mode"
-    return $ Scale baseNote (Mode genus mode)
+    mode <- modeParser
+    return $ Scale baseNote mode
+    where
+    modeParser = namedMode <|> genusMode
+    namedMode = P.choice . map P.try $ [
+        Mode Natural 1 <$ name "dor" "ian",
+        Mode Natural 2 <$ name "phr" "ygian",
+        Mode Natural 3 <$ name "lyd" "ian",
+        Mode Natural 4 <$ name "mix" "olydian",
+        Mode Natural 5 <$ name "aeo" "lian",
+        Mode Natural 6 <$ name "loc" "rian",
+        Mode Natural 7 <$ name "ion" "ian",
+        Mode Natural 7 <$ name "maj" "or"
+        ]
+    name firstpart lastpart = P.lexeme tok (P.string firstpart <* P.option "" (P.string lastpart))
+    genusMode = do
+        genus <- genusParser
+        mode <- fromIntegral <$> P.natural tok
+        when (mode < 1 || mode > genusSize genus) $ fail "Invalid mode"
+        return $ Mode genus mode
 
 renderScale :: Scale -> [Int]
 renderScale (Scale (Note note0) scaleType) = init $ scanl (+) (60+note0) (modeIntervals scaleType)
@@ -190,12 +206,13 @@ shift (Degree a acca) (Degree b accb) = Degree (a+b) (acca+accb)
 
 degreeParser :: Parser Degree
 degreeParser = P.choice [
-    flip Degree <$> accidentalParser <*> (subtract 1 . fromIntegral <$> P.natural tok),
+    flip Degree <$> accidentalParser <*> deg,
     Rest <$ P.symbol tok "~" ]
     where
     deg = do
-        i <- P.integer tok 
-        when (i < 0) $ fail "degrees cannot be zero"
+        sign <- P.option 1 ((-1) <$ P.symbol tok "-")
+        i <- (sign*) . fromIntegral <$> P.natural tok 
+        when (i == 0) $ fail "degrees cannot be zero"
         return $ signum i * (abs i - 1)
 
 degreeRunParser :: Parser [Degree]
