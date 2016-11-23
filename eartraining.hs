@@ -1,15 +1,17 @@
-{-# LANGUAGE RecordWildCards, LambdaCase, TupleSections, BangPatterns #-}
+{-# LANGUAGE RecordWildCards, LambdaCase, TupleSections, BangPatterns, DeriveFunctor #-}
 
 module Main where
 
 import Control.Applicative
 import Control.Arrow (second)
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay, forkFinally)
+import Control.Concurrent.MVar
 import Control.Monad (forM_, filterM, when, (<=<), join)
 import Control.Monad.Trans (liftIO)
-import Data.List (isPrefixOf, intercalate)
+import Data.List (isPrefixOf, intercalate, sort)
 import Data.Maybe (listToMaybe)
 import Data.Tuple (swap)
+import System.IO.Unsafe (unsafePerformIO)
 import System.Random (randomRIO)
 import qualified Data.Char as Char
 import qualified Data.Map as Map
@@ -32,6 +34,37 @@ dist choices = do
 
 uniform :: [a] -> Dist a
 uniform = dist . map (1,)
+
+data Media a
+    = Prim a
+    | Media a :+: Media a
+    | Media a :=: Media a
+    deriving (Functor, Show)
+
+-- This is only well-defined when every Prim takes the same amount of time
+instants :: Media a -> [[a]]
+instants (Prim x) = [[x]]
+instants (a :+: b) = instants a ++ instants b
+instants (a :=: b) = zipm (instants a) (instants b)
+    where
+    zipm [] ys = ys
+    zipm xs [] = xs
+    zipm (x:xs) (y:ys) = (x `mappend` y) : zipm xs ys
+
+instance (Ord a) => Eq (Media a) where
+    a == b = map sort (instants a) == map sort (instants b)
+
+-- The applicative instance is multiplication.
+instance Applicative Media where
+    pure = Prim
+    Prim f <*> m = fmap f m
+    (a :+: b) <*> m = (a <*> m) :+: (b <*> m)
+    (a :=: b) <*> m = (a <*> m) :=: (b <*> m)
+
+retrograde :: Media a -> Media a
+retrograde (Prim a) = Prim a
+retrograde (a :+: b) = retrograde b :+: retrograde a
+retrograde (a :=: b) = retrograde a :=: retrograde b
 
 
 type Parser = P.Parsec String ()
@@ -132,9 +165,6 @@ scaleParser = do
     when (mode < 1 || mode > genusSize genus) $ fail "Invalid mode"
     return $ Scale baseNote (Mode genus mode)
 
-parseScale :: String -> Either P.ParseError Scale
-parseScale = P.parse scaleParser "<input>"
-
 renderScale :: Scale -> [Int]
 renderScale (Scale (Note note0) scaleType) = init $ scanl (+) (60+note0) (modeIntervals scaleType)
 
@@ -155,6 +185,9 @@ shift Rest _ = Rest
 shift _ Rest = Rest
 shift (Degree a acca) (Degree b accb) = Degree (a+b) (acca+accb)
 
+(<>) :: Media Degree -> Media Degree -> Media Degree
+(<>) = liftA2 shift
+
 degreeParser :: Parser Degree
 degreeParser = P.choice [
     flip Degree <$> accidentalParser <*> (subtract 1 . fromIntegral <$> P.natural tok),
@@ -171,10 +204,6 @@ degreeRunParser = P.choice [
     map (`Degree` 0) [0,1..7] <$ P.symbol tok "asc",
     map (`Degree` 0) [7,6..0] <$ P.symbol tok "desc" ]
 
-
-(<>) :: [Degree] -> [Degree] -> [Degree]
-lh <> rh = concatMap (\l -> map (shift l) rh) lh
-
 invert :: Degree -> Degree
 invert (Degree a acc) = Degree (negate a) (negate acc)
 invert Rest = Rest
@@ -189,12 +218,14 @@ applyScale _ Rest = 0
 data DegreeExp 
     = DERun [Degree]
     | DEMult DegreeExp DegreeExp
+    | DEParallel DegreeExp DegreeExp
     | DEConcat DegreeExp DegreeExp
     | DEOp DegreeOperator
     deriving (Show)
 
 instance Pretty DegreeExp where
     pretty (DERun ds) = intercalate "," (map pretty ds)
+    pretty (DEParallel a b) = pretty a ++ " & " ++ pretty b
     pretty (DEMult a b) = pretty a ++ " " ++ pretty b
     pretty (DEConcat a b) = "(" ++ pretty a ++ " + " ++ pretty b ++ ")"
     pretty (DEOp op) = pretty op
@@ -217,24 +248,25 @@ degreeExpParser = catExp
         P.parens tok degreeExpParser,
         DERun <$> degreeRunParser,
         DEOp <$> operator ]
-    opExp = binOp (pure DEMult) atomic
-    mulExp = binOp (DEMult <$ P.symbol tok "<>") opExp
-    catExp = binOp (DEConcat <$ P.symbol tok "+") mulExp
+    parExp = binOp (DEParallel <$ P.symbol tok "&") atomic
+    opExp = binOp (pure DEMult) parExp
+    catExp = binOp (DEConcat <$ P.symbol tok "+") opExp
     binOp op p = flip ($) <$> p <*> P.option id (flip <$> op <*> binOp op p)
     operator = P.choice [
         P.try (DOIdentity <$ P.symbol tok "Id"),
         P.try (DOInvert <$ P.symbol tok "Inv"),
         P.try (DORetrograde <$ P.symbol tok "Ret") ]
 
-interpDegreeExp :: DegreeExp -> [Degree]
-interpDegreeExp = ($ [Degree 0 0]) . go
+interpDegreeExp :: DegreeExp -> Media Degree
+interpDegreeExp = ($ Prim (Degree 0 0)) . go
     where
-    go (DERun run) = (run <>)
+    go (DERun run) = (foldr1 (:+:) (map Prim run) <>)
+    go (DEParallel f g) = liftA2 (:=:) (go f) (go g)
     go (DEMult f g) = go f . go g
-    go (DEConcat f g) = liftA2 (++) (go f) (go g)
+    go (DEConcat f g) = liftA2 (:+:) (go f) (go g)
     go (DEOp DOIdentity) = id
-    go (DEOp DOInvert) = map invert
-    go (DEOp DORetrograde) = reverse
+    go (DEOp DOInvert) = fmap invert
+    go (DEOp DORetrograde) = retrograde
     
 
 data Exp = Exp Scale DegreeExp
@@ -246,12 +278,11 @@ instance Pretty Exp where
 expParser :: Parser Exp
 expParser = Exp <$> scaleParser <*> degreeExpParser
 
-evalExp :: Exp -> [Int]
-evalExp (Exp scale degexp) = map (applyScale (renderScale scale)) (interpDegreeExp degexp)
+evalExp :: Exp -> Media Int
+evalExp (Exp scale degexp) = fmap (applyScale (renderScale scale)) (interpDegreeExp degexp)
 
 
 data Game = Game {
-    playC4 :: IO (),
     game :: Dist Exp -> Double -> IO (),
     audition :: String -> Double -> IO ()
 }
@@ -261,9 +292,8 @@ startGame :: IO Game
 startGame = do
     dest <- connectOutput "IAC Bus 1"
     return $ Game {
-        playC4 = playNotes 1 [60] dest,
         game = gameFromSchema dest,
-        audition = \inp tempo -> case P.parse expParser "<input>" inp of
+        audition = \inp tempo -> case P.parse (expParser <* P.eof) "<input>" inp of
             Right exp -> playNotes (15/tempo) (evalExp exp) dest
             Left err -> print err
     }
@@ -280,7 +310,18 @@ levels = [
     "Modes of C"         --> 
         Exp <$> (Scale <$> pure (Note 0) <*> join (uniform [naturalMode, melodicMode])) <*> asc,
 
-    "Patterns in C major" --> Exp <$> pure (Scale (Note 0) (Mode Natural 7)) <*> (fancyPattern 4 16)
+    "Intervals from C" -->
+        Exp (Scale (Note 0) (Mode Natural 7)) <$> do {
+            n <- uniform [1..7];
+            acc <- uniform [-1..1]; 
+            return (DEParallel (DERun [Degree 0 0]) (DERun [Degree n acc])) },
+
+
+    "Chords of C major" --> Exp (Scale (Note 0) (Mode Natural 7)) <$> chord 3,
+    "Chords of Natural Modes of C (3 notes)" -->  
+        Exp <$> (Scale <$> pure (Note 0) <*> naturalMode) <*> chord 3,
+    "Chords of Natural Modes of C (4 notes)" --> 
+        Exp <$> (Scale <$> pure (Note 0) <*> naturalMode) <*> chord 4
     ]
     where
     infix 1 -->
@@ -290,17 +331,21 @@ levels = [
     naturalMode = Mode <$> pure Natural <*> uniform [1..7]
     melodicMode = Mode <$> pure Melodic <*> uniform [1..7]
 
-    pattern = join $ uniform [
-        DERun . (:[]) . (`Degree` 0) <$> uniform [0..7],
-        pure $ DEOp DOInvert,
-        pure $ DEOp DORetrograde,
-        DEConcat <$> pattern <*> pattern,
-        DEMult <$> pattern <*> pattern
-        ]
-    fancyPattern lo hi = do
-        p <- pattern
-        if checkLength lo hi (interpDegreeExp p) && length (pretty p) < 60 then return p else fancyPattern lo hi
+    chord :: Int -> Dist DegreeExp
+    chord = fmap (foldr1 DEParallel . map (\n -> DERun [Degree n 0])) . go
+        where
+        go n = do
+            n1 <- uniform [0..6]
+            (n1:) <$> go' (n-1) n1
+        go' 0 accum = return []
+        go' n accum = do
+            ni <- uniform [1..3]
+            ((accum+ni) :) <$> go' (n-1) (accum+ni)
 
+    adjust m n
+        | n >= m = n+1
+        | otherwise = n
+        
 
 checkLength :: Int -> Int -> [a] -> Bool
 checkLength !lo !hi [] = lo <= 0
@@ -323,17 +368,18 @@ gameFromSchema conn expdist tempo = do
         case ans of
             "r" -> liftIO (play notes) >> iter exp notes
             "slow" -> liftIO (playNotes (2*delay) notes conn) >> iter exp notes
-            "ref" -> liftIO (putStrLn "C" >> playNotes 1 [60] conn) >> iter exp notes
+            "ref" -> liftIO (putStrLn "C" >> playNotes 1 (Prim 60) conn) >> iter exp notes
+            "giveup" -> liftIO (putStrLn (pretty exp))
             _ | "audition " `isPrefixOf` ans -> 
-                case P.parse expParser "<audition>" (drop (length "audition ") ans) of
+                case P.parse (expParser <* P.eof) "<audition>" (drop (length "audition ") ans) of
                     Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
                     Right exp' -> liftIO (playNotes (15/tempo) (evalExp exp') conn) >> iter exp notes
               | otherwise ->
-                case P.parse expParser "<input>" ans of
+                case P.parse (expParser <* P.eof) "<input>" ans of
                     Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
                     Right exp' -> if evalExp exp' == notes
                                  then liftIO $ putStrLn ("Correct: " ++ pretty exp)  >> play notes
-                                 else liftIO (putStrLn "Incorrect!") >> iter exp notes
+                                 else liftIO (putStrLn "Incorrect!" >> play (evalExp exp')) >> iter exp notes
     delay = 15/tempo -- the length of a sixteenth note
     
 
@@ -345,12 +391,29 @@ connectOutput destName = do
     putStrLn . ("Connected to destintion " ++) =<< MIDI.getName destination
     return conn
 
-playNotes :: Double -> [Int] -> MIDI.Connection -> IO ()
-playNotes dt notes conn = do
-    forM_ notes $ \note -> do
-        when (note /= 0) $ MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOn note 64))
-        threadDelay (floor (10^6 * dt))
-        when (note /= 0) $ MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOff note 0))
+midiLock :: IO a -> IO a
+midiLock = \action -> do takeMVar lock ; x <- action ; putMVar lock () ; return x
+    where
+    {-# NOINLINE lock #-}
+    lock = unsafePerformIO $ newMVar ()
+
+playNotes :: Double -> Media Int -> MIDI.Connection -> IO ()
+playNotes dt (Prim note) conn = do
+    when (note /= 0) . midiLock $ MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOn note 64))
+    threadDelay (floor (10^6 * dt))
+    when (note /= 0) . midiLock $ MIDI.send conn (MIDI.MidiMessage 1 (MIDI.NoteOff note 0))
+playNotes dt (m :+: m') conn = do
+    playNotes dt m conn
+    playNotes dt m' conn
+playNotes dt (m :=: m') conn = do
+    v <- newEmptyMVar
+    v' <- newEmptyMVar
+    t <- forkFinally (playNotes dt m conn) $ \_ -> putMVar v ()
+    t' <- forkFinally (playNotes dt m' conn) $ \_ -> putMVar v' ()
+    () <- takeMVar v
+    () <- takeMVar v'
+    return ()
+    
 
 choice :: [a] -> IO a
 choice [] = error "choice []"
