@@ -27,9 +27,12 @@ data Level = Level {
     levelDesc :: String,
     levelSpec :: Dist (Exp, String -> Bool) }
 
+levels :: [Level]
+levels = [
+    majorScaleIntervals ]
 
-level1 :: Level
-level1 = Level {
+majorScaleIntervals :: Level
+majorScaleIntervals = Level {
     levelName = "Major scale intervals",
     levelDesc = concat ["I will play the 1 and then another degree of the major scale, ",
                         "and you need to identify which degree that is as a number."],

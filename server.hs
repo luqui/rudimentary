@@ -53,8 +53,8 @@ main = do
         S.json $ J.Array (J.String . fromString <$> fromList devnames)
 
     S.get "/level" $ do
-        --levelname <- S.param "name"
-        level <- return Levels.level1
+        levelname <- S.param "name"
+        level <- return . head . filter ((levelname ==) . Levels.levelName) $ Levels.levels
         sessionid <- liftIO $ modifyMVar sessionCounter (\i -> return (i+1,i))
         liftIO $ modifyMVar_ sessions (return . Map.insert sessionid (Session level Nothing))
 
@@ -91,4 +91,4 @@ main = do
                         "correct" J..= J.Bool False ]
 
     S.get "/levels" $ do
-        S.json $ J.Array ["Level 1"]
+        S.json . J.Array $ J.String . fromString . Levels.levelName <$> fromList Levels.levels
