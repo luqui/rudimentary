@@ -27,24 +27,69 @@
       }
     });
   });
-  
-  $('#expr').keyup(function(e){
-    if(e.keyCode == 13)
-    {
-      if ($('#current_device').text() == "none") {
-        alert('You must select a MIDI device');
-        return;
+
+  $('#levels_menu_activate').click(function() {
+    $.ajax({ url: '/levels' }).then(function(data) {
+      $('#levels_menu').empty();
+      for (var i in data) {
+        (function() {
+          var level = data[i];
+          $('#levels_menu').append($('<li>').append(
+            $('<a>').append(level)
+                    .attr('href', '#')
+                    .click(function() {
+                        $('#current_level').text(level);
+                        load_level(level);
+                    })));
+        })();
       }
-      $('#errormsg_box').empty();
-      $.ajax({ url: '/play?dev=' + encodeURIComponent($('#current_device').text())
-                       + '&exp=' + encodeURIComponent($('#expr').val()) }).then(function(r) {
-        if (r.type === 'error') {
-          $('#errormsg_box').append(
-            $('<div>').addClass('alert alert-danger').text(r.message));
-        }
-      });
-    }
-  }); 
+    });
+  });
+
+  var load_level = function(levelname) {
+    $('#levelcontent').empty();
+    $.ajax({ url: '/level?name=' + encodeURIComponent(levelname) }).then(function(data) {
+        var input = $('<input>').attr('type', 'text').addClass('form-control');
+        var errorbox = $('<div>');
+        var button = $('<button>').addClass('btn btn-primary').text('Submit');
+
+        $('#levelcontent').append(
+            $('<h2>').text(data.name),
+            $('<p>').text(data.desc),
+            $('<div>').addClass('row').append(
+                $('<div>').addClass('col-md-8').append(input),
+                $('<div>').addClass('col-md-4').append(button)),
+            errorbox);
+
+        var submit = function() {
+          if ($('#current_device').text() == "none") {
+            alert('You must select a MIDI device');
+            return;
+          }
+          errorbox.empty();
+          $.ajax({ url: '/trylevel?dev=' + encodeURIComponent($('#current_device').text())
+                               + '&session=' + encodeURIComponent(data.session)
+                               + '&answer=' + encodeURIComponent(input.val()) }).then(function(response) {
+                if ('correct' in response && response.correct) {
+                  errorbox.append(
+                    $('<div>').addClass('alert alert-success').html(
+                      "Correct!<br>Notation:<pre>" + response.notation + "</pre>"));
+                  input.val('');
+                }
+                else if ('correct' in response && !response.correct) {
+                  errorbox.append(
+                    $('<div>').addClass('alert alert-danger').text('Incorrect!'));
+                }
+              });
+        };
+        button.click(submit);
+        input.keyup(function(e) {
+          if(e.keyCode == 13) {
+            submit();
+          }
+        });
+    });         
+  };
  });
 </script>
  <body>
@@ -55,9 +100,14 @@
      </ul>
    </div>
 
-   <input type="text" class="form-control" id="expr" />
-   <div id="errormsg_box">
+   <div class="dropdown">
+     <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="levels_menu_activate">Level: <span id="current_level">none</span><span class="caret"></span></a>
+     <ul class="dropdown-menu" id="levels_menu">
+     </ul>
    </div>
+
+   <div id="levelcontent">
+   </div> 
   </div>
  </body>
 </html>

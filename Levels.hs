@@ -35,6 +35,6 @@ level1 = Level {
                         "and you need to identify which degree that is as a number."],
     levelSpec = do
         i <- uniform [1..7]
-        return (Exp (Scale (Note 0) (Mode Natural 1)) (DERun [Degree 0 0, Degree i 0]), 
-                (== show i))
+        return (Exp (Scale (Note 0) (Mode Natural 7)) (DERun [Degree 0 0, Degree i 0]), 
+                (== show (i+1)))
   }
