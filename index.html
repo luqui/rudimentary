@@ -68,6 +68,7 @@
           }
           errorbox.empty();
           $.ajax({ url: '/trylevel?dev=' + encodeURIComponent($('#current_device').text())
+                               + '&tempo=' + encodeURIComponent($('#tempo').val())
                                + '&session=' + encodeURIComponent(data.session)
                                + '&answer=' + encodeURIComponent(input.val()) }).then(function(response) {
                 if ('correct' in response && response.correct) {
@@ -94,16 +95,23 @@
 </script>
  <body>
   <div class="container">
-   <div class="dropdown">
-     <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="devices_menu_activate">MIDI Device: <span id="current_device">none</span><span class="caret"></span></a>
-     <ul class="dropdown-menu" id="devices_menu">
-     </ul>
-   </div>
+   <div class="row">
+    <div class="col-md-6">
+     <div class="dropdown">
+      <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="devices_menu_activate">MIDI Device: <span id="current_device">none</span><span class="caret"></span></a>
+      <ul class="dropdown-menu" id="devices_menu">
+      </ul>
+     </div>
 
-   <div class="dropdown">
-     <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="levels_menu_activate">Level: <span id="current_level">none</span><span class="caret"></span></a>
-     <ul class="dropdown-menu" id="levels_menu">
-     </ul>
+     <div class="dropdown">
+      <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="levels_menu_activate">Level: <span id="current_level">none</span><span class="caret"></span></a>
+      <ul class="dropdown-menu" id="levels_menu">
+      </ul>
+     </div>
+    </div>
+    <div class="col-md-6">
+     Tempo <input id="tempo" value="60" size="4" /> bpm
+    </div>
    </div>
 
    <div id="levelcontent">

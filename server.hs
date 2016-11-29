@@ -34,20 +34,6 @@ main = do
     S.get "/resources/:file" $ do
         S.file . ("resources/"<>) =<< S.param "file"
 
-    S.get "/play" $ do
-        devname <- S.param "dev"
-        expstr <- S.param "exp"
-
-        case Syntax.parseString Syntax.parse expstr of
-            Left err -> S.json $ J.object [ 
-                "type" J..= J.String "error",
-                "message" J..= J.String (fromString (show err)) ]
-            Right expr -> do
-                dev <- liftIO $ MIDI.connectOutput devname
-                liftIO . forkIO $ MIDI.playNotes 1 (Semantics.evalExp expr) dev
-                S.json $ J.object [
-                    "type" J..= J.String "success" ]
-
     S.get "/devices" $ do
         devnames <- liftIO $ mapM SysMid.getName =<< SysMid.enumerateDestinations
         S.json $ J.Array (J.String . fromString <$> fromList devnames)
@@ -67,6 +53,7 @@ main = do
         devname <- S.param "dev"
         sessionid <- S.param "session"
         answer <- S.param "answer"
+        tempo <- S.param "tempo"
 
         session <- liftIO $ (Map.! sessionid) <$> readMVar sessions
         dev <- liftIO $ MIDI.connectOutput devname
@@ -74,12 +61,12 @@ main = do
         (S.json =<<) . liftIO $ case sessionAttempt session of
             Nothing -> do
                 (expr, ans) <- Rand.evalRandIO (Levels.levelSpec (sessionLevel session))
-                forkIO $ MIDI.playNotes 1 (Semantics.evalExp expr) dev
+                forkIO $ MIDI.playNotes (60/tempo) (Semantics.evalExp expr) dev
                 modifyMVar_ sessions $
                     return . Map.insert sessionid (session { sessionAttempt = Just (expr, ans) })
                 return $ J.object []
             Just (expr, ans) -> do
-                forkIO $ MIDI.playNotes 1 (Semantics.evalExp expr) dev
+                forkIO $ MIDI.playNotes (60/tempo) (Semantics.evalExp expr) dev
                 if | null answer -> return $ J.object []
                    | ans answer -> do
                         modifyMVar_ sessions $
