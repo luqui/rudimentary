@@ -431,22 +431,3 @@ playNotes dt (m :=: m') conn = do
     () <- takeMVar v'
     return ()
     
-
-choice :: [a] -> IO a
-choice [] = error "choice []"
-choice xs = do
-    i <- randomRIO (0, length xs-1)
-    return $ xs !! i
-
-maybeRead :: (Read a) => String -> Maybe a
-maybeRead s = listToMaybe [ x | (x,"") <- reads s ]
-
-randPerm :: [a] -> IO [a]
-randPerm [] = return []
-randPerm xs = do
-    (s,ss) <- choice (selects xs)
-    (s:) <$> randPerm ss
-
-selects :: [a] -> [(a, [a])]
-selects [] = []
-selects (x:xs) = (x,xs) : (map.second) (x:) (selects xs)
