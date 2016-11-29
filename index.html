@@ -53,7 +53,7 @@
         var currentSelection = $('<span>').text(component.value);
         var options = $('<ul>').addClass('dropdown-menu');
         var dropdown = $('<div>').addClass('dropdown').append(
-          $('<a>').addClass('dropdown-toggle')
+          $('<a>').addClass('dropdown-toggle panel-title')
                   .attr('href', '#')
                   .attr('data-toggle', 'dropdown')
                   .attr('role', 'button')
@@ -75,7 +75,20 @@
                         })));
           })();
         }
-        container.append(dropdown);
+        var description = '';
+        for (var opt in component.options) {
+          console.log('Checking ', component.options[opt].name, 'against', component.value);
+          if (component.options[opt].name === component.value) { //XXX name->value
+            description = component.options[opt].desc;
+          }
+        }
+
+        container.append(
+          $('<div>').addClass('panel panel-info').append(
+            $('<div>').addClass('panel-heading').append(
+              dropdown),
+            !description ? $([]) : $('<div>').addClass('panel-body').append(
+              $('<p>').html(description))));
       })();
     }
 
