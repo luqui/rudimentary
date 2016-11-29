@@ -139,10 +139,14 @@ instance Syntax Scale where
     parse = Scale <$> parse <*> parse
 
 instance Syntax Degree where
-    pretty (Degree n acc) = showacc ++ show (signum n * (1 + abs n))
+    pretty (Degree n acc) = showacc ++ show (correct n)
         where
         showacc | acc < 0 = replicate (-acc) 'b'
                 | otherwise = replicate acc '#'
+        correct n = case compare n 0 of
+                        LT -> n - 1
+                        EQ -> 1
+                        GT -> n + 1
     pretty Rest = "~"
 
     parse = P.choice [

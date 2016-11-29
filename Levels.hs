@@ -3,6 +3,7 @@
 module Levels where
 
 import Control.Applicative
+import Control.Monad.Trans.Writer
 import Control.Monad (join)
 import qualified Control.Monad.Random as Rand
 
@@ -21,6 +22,7 @@ dist choices = do
 
 uniform :: [a] -> Dist a
 uniform = dist . map (1,)
+
 
 data Level = Level {
     levelName :: String,
