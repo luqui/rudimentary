@@ -28,24 +28,61 @@
     });
   });
 
-  $('#levels_menu_activate').click(function() {
-    $.ajax({ url: '/levels' }).then(function(data) {
-      $('#levels_menu').empty();
-      for (var i in data) {
-        (function() {
-          var level = data[i];
-          $('#levels_menu').append($('<li>').append(
-            $('<a>').append(level)
-                    .attr('href', '#')
-                    .click(function() {
-                        $('#current_level').text(level);
-                        load_level(level);
-                    })));
-        })();
-      }
-    });
-  });
+  var textNode = function(text) {
+    return document.createTextNode(text);
+  }
 
+  var fetch_level = function(params, container) {
+    $.ajax({
+      url: '/level?params=' + encodeURIComponent(JSON.stringify(params)) }
+    ).then(function(data) {
+      container.empty();
+      render_level(data, container);
+    });
+  };
+
+  var render_level = function(ajaxData, container) {
+    var components = ajaxData.content;
+    var params = {};
+    for (var _index in components) {
+      (function() {
+        var index = _index;
+        var component = components[index];
+        params[component.label] = component.value;
+
+        var currentSelection = $('<span>').text(component.value);
+        var options = $('<ul>').addClass('dropdown-menu');
+        var dropdown = $('<div>').addClass('dropdown').append(
+          $('<a>').addClass('dropdown-toggle')
+                  .attr('href', '#')
+                  .attr('data-toggle', 'dropdown')
+                  .attr('role', 'button')
+                  .append(
+              textNode(component.title + ': '),
+              currentSelection,
+              $('<span>').addClass('caret')),
+          options);
+        for (var _opt in component.options) {
+          (function() {
+            var opt = _opt;
+            options.append(
+              $('<li>').append(
+                $('<a>').attr('href', '#')
+                        .text(component.options[opt].name)
+                        .click(function() {
+                          params[component.label] = component.options[opt].name; //XXX name->value
+                          fetch_level(params, container);
+                        })));
+          })();
+        }
+        container.append(dropdown);
+      })();
+    }
+  };
+
+  fetch_level({}, $('#levelcontent'));
+
+/*
   var load_level = function(levelname) {
     $('#levelcontent').empty();
     $.ajax({ url: '/level?name=' + encodeURIComponent(levelname) }).then(function(data) {
@@ -93,6 +130,7 @@
         });
     });         
   };
+*/
  });
 </script>
  <body>
@@ -102,12 +140,6 @@
      <div class="dropdown">
       <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="devices_menu_activate">MIDI Device: <span id="current_device">none</span><span class="caret"></span></a>
       <ul class="dropdown-menu" id="devices_menu">
-      </ul>
-     </div>
-
-     <div class="dropdown">
-      <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="levels_menu_activate">Level: <span id="current_level">none</span><span class="caret"></span></a>
-      <ul class="dropdown-menu" id="levels_menu">
       </ul>
      </div>
     </div>

@@ -13,14 +13,28 @@ import qualified Data.Map as Map
 import qualified System.MIDI as SysMid
 import qualified Web.Scotty as S
 
+import qualified Levels
 import qualified MIDI
+import qualified Params
 import qualified Syntax
 import qualified Semantics
-import qualified Levels
 
 data Session = Session {
-    sessionLevel :: Levels.Level,
+    sessionParams :: Map.Map String String,
     sessionAttempt :: Maybe (Syntax.Exp, String -> Bool) }
+
+selectJSON :: [(String, Params.SelectWidget, String)] -> J.Value
+selectJSON outs = J.Array . fromList $ do
+    (name, widget, value) <- outs
+    return $ J.object [
+        "label" J..= J.String (fromString name),
+        "title" J..= J.String (fromString (Params.swTitle widget)),
+        "value" J..= J.String (fromString value),
+        "options" J..= J.Array (fromList [
+            J.object [ "name" J..= J.String (fromString name),
+                       "desc" J..= J.String (fromString desc) ]
+            | (name, desc) <- Params.swOptions widget ])
+      ]
 
 main :: IO ()
 main = do
@@ -39,16 +53,17 @@ main = do
         S.json $ J.Array (J.String . fromString <$> fromList devnames)
 
     S.get "/level" $ do
-        levelname <- S.param "name"
-        level <- return . head . filter ((levelname ==) . Levels.levelName) $ Levels.levels
+        Just params <- J.decode <$> S.param "params"
         sessionid <- liftIO $ modifyMVar sessionCounter (\i -> return (i+1,i))
-        liftIO $ modifyMVar_ sessions (return . Map.insert sessionid (Session level Nothing))
+
+        let (_, outs) = Params.runParams Levels.levels params
+        let session = Session (Params.outputToInput outs) Nothing
+        liftIO $ modifyMVar_ sessions (return . Map.insert sessionid session)
 
         S.json $ J.object [
-            "name" J..= J.String (fromString (Levels.levelName level)),
-            "desc" J..= J.String (fromString (Levels.levelDesc level)),
-            "session" J..= J.Number (fromIntegral sessionid) ]
-
+            "session" J..= J.Number (fromIntegral sessionid),
+            "content" J..= selectJSON outs ]
+            
     S.get "/trylevel" $ do
         devname <- S.param "dev"
         sessionid <- S.param "session"
@@ -63,7 +78,8 @@ main = do
 
         (S.json =<<) . liftIO $ case sessionAttempt session of
             Nothing -> do
-                (expr, ans) <- Rand.evalRandIO (Levels.levelSpec (sessionLevel session))
+                let (dist, _) = Params.runParams Levels.levels (sessionParams session)
+                (expr, ans) <- Rand.evalRandIO dist
                 forkIO $ MIDI.playNotes (60/tempo) (Semantics.evalExp expr) dev
                 modifyMVar_ sessions $
                     return . Map.insert sessionid (session { sessionAttempt = Just (expr, ans) })
@@ -79,6 +95,3 @@ main = do
                             "notation" J..= Syntax.pretty expr ]
                    | otherwise -> return $ J.object [
                         "correct" J..= J.Bool False ]
-
-    S.get "/levels" $ do
-        S.json . J.Array $ J.String . fromString . Levels.levelName <$> fromList Levels.levels
