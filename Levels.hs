@@ -44,6 +44,7 @@ majorScaleIntervals = Level {
         return (Exp (Scale (Note 0) (Mode Natural 7)) (DERun [Degree 0 0, Degree i 0]), 
                 (== show (i + 1)))
   }
+ 
 
 
 majorScaleIntervalsOct :: Level

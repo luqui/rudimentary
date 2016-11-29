@@ -51,17 +51,18 @@
     $.ajax({ url: '/level?name=' + encodeURIComponent(levelname) }).then(function(data) {
         var input = $('<input>').attr('type', 'text').addClass('form-control');
         var errorbox = $('<div>');
-        var button = $('<button>').addClass('btn btn-primary').text('Submit');
+        var submitbtn = $('<button>').addClass('btn btn-primary').text('Submit');
+        var giveupbtn = $('<button>').addClass('btn btn-warning pull-right').text('Give up');
 
         $('#levelcontent').append(
             $('<h2>').text(data.name),
             $('<p>').html(data.desc),
             $('<div>').addClass('row').append(
                 $('<div>').addClass('col-md-8').append(input),
-                $('<div>').addClass('col-md-4').append(button)),
+                $('<div>').addClass('col-md-4').append(submitbtn, giveupbtn)),
             errorbox);
 
-        var submit = function() {
+        var submit = function(ans) {
           if ($('#current_device').text() == "none") {
             alert('You must select a MIDI device');
             return;
@@ -70,7 +71,7 @@
           $.ajax({ url: '/trylevel?dev=' + encodeURIComponent($('#current_device').text())
                                + '&tempo=' + encodeURIComponent($('#tempo').val())
                                + '&session=' + encodeURIComponent(data.session)
-                               + '&answer=' + encodeURIComponent(input.val()) }).then(function(response) {
+                               + '&answer=' + encodeURIComponent(ans) }).then(function(response) {
                 if ('correct' in response && response.correct) {
                   errorbox.append(
                     $('<div>').addClass('alert alert-success').html(
@@ -83,10 +84,11 @@
                 }
               });
         };
-        button.click(submit);
+        submitbtn.click(function() { submit(input.val()) });
+        giveupbtn.click(function() { input.val(''); submit('GIVEUP') });
         input.keyup(function(e) {
           if(e.keyCode == 13) {
-            submit();
+            submit(input.val());
           }
         });
     });         

@@ -55,7 +55,10 @@ main = do
         answer <- S.param "answer"
         tempo <- S.param "tempo"
 
-        session <- liftIO $ (Map.! sessionid) <$> readMVar sessions
+        let filterSession s | answer == "GIVEUP" = s { sessionAttempt = Nothing }
+                            | otherwise = s
+
+        session <- liftIO $ filterSession . (Map.! sessionid) <$> readMVar sessions
         dev <- liftIO $ MIDI.connectOutput devname
 
         (S.json =<<) . liftIO $ case sessionAttempt session of
