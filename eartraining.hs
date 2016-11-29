@@ -17,9 +17,9 @@ import qualified Data.Char as Char
 import qualified Data.Map as Map
 import qualified System.Console.Haskeline as RL
 import qualified System.MIDI as MIDI
-import qualified Text.Parsec as P
-import qualified Text.Parsec.Token as P
 import qualified Control.Monad.Random as Rand
+
+import Syntax
 
 type Dist = Rand.Rand Rand.StdGen
 
@@ -67,134 +67,15 @@ retrograde (a :+: b) = retrograde b :+: retrograde a
 retrograde (a :=: b) = retrograde a :=: retrograde b
 
 
-type Parser = P.Parsec String ()
-
-
-tok = P.makeTokenParser $ P.LanguageDef {
-        P.commentStart = "",
-        P.commentEnd = "",
-        P.commentLine = "",
-        P.nestedComments = False,
-        P.identStart = fail "no identifiers",
-        P.identLetter = fail "no identifiers",
-        P.opStart = fail "no operators",
-        P.opLetter = fail "no operators",
-        P.reservedNames = [],
-        P.reservedOpNames = [],
-        P.caseSensitive = True 
-    }
-
-class Pretty a where
-    pretty :: a -> String
-
-data ScaleGenus
-    = Natural
-    | Melodic
-    | Diminished
-    deriving (Eq, Ord, Read, Show, Bounded, Enum)
-
-instance Pretty ScaleGenus where
-    pretty Natural = "nat"
-    pretty Melodic = "mel"
-    pretty Diminished = "dim"
-
-genusParser :: Parser ScaleGenus
-genusParser = P.choice [
-    Natural <$ P.symbol tok "nat",
-    Melodic <$ P.symbol tok "mel",
-    Diminished <$ P.symbol tok "dim" ]
-
-genusIntervals :: ScaleGenus -> [Int]
-genusIntervals Natural = [2,1,2,2,2,1,2]      -- dorian, the center
-genusIntervals Melodic = [2,2,1,2,1,2,2]      -- major-minor
-genusIntervals Diminished = [2,1,2,1,2,1,2,1] -- 2-1 (diminished does not have a center mode!)
-
-genusSize :: ScaleGenus -> Int
-genusSize = length . genusIntervals
-
-data Mode = Mode ScaleGenus Int  -- 1-based mode
-    deriving (Eq, Ord, Show)
-
-instance Pretty Mode where
-    pretty (Mode g n) = pretty g ++ " " ++ show n
-
 modeIntervals :: Mode -> [Int]
 modeIntervals (Mode g m) = trunc intervals (drop (m-1) (cycle (genusIntervals g)))
     where
     intervals = genusIntervals g
     trunc = zipWith (const id)
 
-newtype Note = Note Int
-    deriving (Eq, Ord, Show)
-
-instance Pretty Note where
-    pretty = noteName
-
-baseNoteNames :: [(String, Int)]
-baseNoteNames = [("C", 0), ("D", 2), ("E", 4), ("F", 5), ("G", 7), ("A", 9), ("B", 11)]
-
-noteName :: Note -> String
-noteName (Note i) = noteMap Map.! i
-    where
-    noteMap = Map.fromList . map swap $ [ (name ++ "#", note+1) | (name,note) <- baseNoteNames ] ++ baseNoteNames
-
-accidentalParser :: Parser Int
-accidentalParser = P.choice [
-    length <$> P.many1 (P.symbol tok "#"),
-    negate . length <$> P.many1 (P.symbol tok "b"),
-    return 0 ]
-
-noteParser :: Parser Note
-noteParser = do
-    i <- P.choice [ i <$ (P.symbol tok (map Char.toUpper n) <|> P.symbol tok (map Char.toLower n))
-                  | (n,i) <- baseNoteNames ]
-    acc <- accidentalParser
-    return . Note $ (i + acc) `mod` 12
-
-data Scale = Scale Note Mode
-    deriving (Eq, Ord, Show)
-
-instance Pretty Scale where
-    pretty (Scale n m) = pretty n ++ " " ++ pretty m
-
-scaleParser :: Parser Scale
-scaleParser = do
-    baseNote <- noteParser
-    mode <- modeParser
-    return $ Scale baseNote mode
-    where
-    modeParser = namedMode <|> genusMode
-    namedMode = P.choice . map P.try $ [
-        Mode Natural 1 <$ name "dor" "ian",
-        Mode Natural 2 <$ name "phr" "ygian",
-        Mode Natural 3 <$ name "lyd" "ian",
-        Mode Natural 4 <$ name "mix" "olydian",
-        Mode Natural 5 <$ name "aeo" "lian",
-        Mode Natural 6 <$ name "loc" "rian",
-        Mode Natural 7 <$ name "ion" "ian",
-        Mode Natural 7 <$ name "maj" "or"
-        ]
-    name firstpart lastpart = P.lexeme tok (P.string firstpart <* P.option "" (P.string lastpart))
-    genusMode = do
-        genus <- genusParser
-        mode <- fromIntegral <$> P.natural tok
-        when (mode < 1 || mode > genusSize genus) $ fail "Invalid mode"
-        return $ Mode genus mode
-
 renderScale :: Scale -> [Int]
 renderScale (Scale (Note note0) scaleType) = init $ scanl (+) (60+note0) (modeIntervals scaleType)
 
-
-data Degree 
-    = Degree Int Int   -- degree(0-based) accidental
-    | Rest
-    deriving (Eq, Ord, Show)
-
-instance Pretty Degree where
-    pretty (Degree n acc) = showacc ++ show (1+n)
-        where
-        showacc | acc < 0 = replicate (-acc) 'b'
-                | acc >= 0 = replicate acc '#'
 
 shift :: Degree -> Degree -> Degree
 shift Rest _ = Rest
@@ -203,23 +84,6 @@ shift (Degree a acca) (Degree b accb) = Degree (a+b) (acca+accb)
 
 (<>) :: Media Degree -> Media Degree -> Media Degree
 (<>) = liftA2 shift
-
-degreeParser :: Parser Degree
-degreeParser = P.choice [
-    flip Degree <$> accidentalParser <*> deg,
-    Rest <$ P.symbol tok "~" ]
-    where
-    deg = do
-        sign <- P.option 1 ((-1) <$ P.symbol tok "-")
-        i <- (sign*) . fromIntegral <$> P.natural tok 
-        when (i == 0) $ fail "degrees cannot be zero"
-        return $ signum i * (abs i - 1)
-
-degreeRunParser :: Parser [Degree]
-degreeRunParser = P.choice [
-    degreeParser `P.sepBy1` P.symbol tok ",",
-    map (`Degree` 0) [0,1..7] <$ P.symbol tok "asc",
-    map (`Degree` 0) [7,6..0] <$ P.symbol tok "desc" ]
 
 invert :: Degree -> Degree
 invert (Degree a acc) = Degree (negate a) (negate acc)
@@ -231,48 +95,6 @@ applyScale scale (Degree deg acc) = (scale !! (deg `mod` len)) + 12 * (deg `div`
     len = length scale
 applyScale _ Rest = 0
     
-
-data DegreeExp 
-    = DERun [Degree]
-    | DEMult DegreeExp DegreeExp
-    | DEParallel DegreeExp DegreeExp
-    | DEConcat DegreeExp DegreeExp
-    | DEOp DegreeOperator
-    deriving (Show)
-
-instance Pretty DegreeExp where
-    pretty (DERun ds) = intercalate "," (map pretty ds)
-    pretty (DEParallel a b) = pretty a ++ " & " ++ pretty b
-    pretty (DEMult a b) = pretty a ++ " " ++ pretty b
-    pretty (DEConcat a b) = "(" ++ pretty a ++ " + " ++ pretty b ++ ")"
-    pretty (DEOp op) = pretty op
-
-data DegreeOperator
-    = DOIdentity
-    | DOInvert
-    | DORetrograde
-    deriving (Show)
-
-instance Pretty DegreeOperator where
-    pretty DOIdentity = "Id"
-    pretty DOInvert = "Inv"
-    pretty DORetrograde = "Ret"
-
-degreeExpParser :: Parser DegreeExp
-degreeExpParser = catExp
-    where
-    atomic = P.choice [
-        P.parens tok degreeExpParser,
-        DERun <$> degreeRunParser,
-        DEOp <$> operator ]
-    parExp = binOp (DEParallel <$ P.symbol tok "&") atomic
-    opExp = binOp (pure DEMult) parExp
-    catExp = binOp (DEConcat <$ P.symbol tok "+") opExp
-    binOp op p = flip ($) <$> p <*> P.option id (flip <$> op <*> binOp op p)
-    operator = P.choice [
-        P.try (DOIdentity <$ P.symbol tok "Id"),
-        P.try (DOInvert <$ P.symbol tok "Inv"),
-        P.try (DORetrograde <$ P.symbol tok "Ret") ]
 
 interpDegreeExp :: DegreeExp -> Media Degree
 interpDegreeExp = ($ Prim (Degree 0 0)) . go
@@ -286,14 +108,6 @@ interpDegreeExp = ($ Prim (Degree 0 0)) . go
     go (DEOp DORetrograde) = retrograde
     
 
-data Exp = Exp Scale DegreeExp
-    deriving (Show)
-
-instance Pretty Exp where
-    pretty (Exp scale de) = pretty scale ++ " " ++ pretty de
-
-expParser :: Parser Exp
-expParser = Exp <$> scaleParser <*> degreeExpParser
 
 evalExp :: Exp -> Media Int
 evalExp (Exp scale degexp) = fmap (applyScale (renderScale scale)) (interpDegreeExp degexp)
@@ -310,7 +124,7 @@ startGame = do
     dest <- connectOutput "IAC Bus 1"
     return $ Game {
         game = gameFromSchema dest,
-        audition = \inp tempo -> case P.parse (expParser <* P.eof) "<input>" inp of
+        audition = \inp tempo -> case parse expParser inp of
             Right exp -> playNotes (15/tempo) (evalExp exp) dest
             Left err -> print err
     }
@@ -388,11 +202,11 @@ gameFromSchema conn expdist tempo = do
             "ref" -> liftIO (putStrLn "C" >> playNotes 1 (Prim 60) conn) >> iter exp notes
             "giveup" -> liftIO (putStrLn (pretty exp))
             _ | "audition " `isPrefixOf` ans -> 
-                case P.parse (expParser <* P.eof) "<audition>" (drop (length "audition ") ans) of
+                case parse expParser (drop (length "audition ") ans) of
                     Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
                     Right exp' -> liftIO (playNotes (15/tempo) (evalExp exp') conn) >> iter exp notes
               | otherwise ->
-                case P.parse (expParser <* P.eof) "<input>" ans of
+                case parse expParser ans of
                     Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
                     Right exp' -> if evalExp exp' == notes
                                  then liftIO $ putStrLn ("Correct: " ++ pretty exp)  >> play notes
