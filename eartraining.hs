@@ -124,7 +124,7 @@ startGame = do
     dest <- connectOutput "IAC Bus 1"
     return $ Game {
         game = gameFromSchema dest,
-        audition = \inp tempo -> case parse expParser inp of
+        audition = \inp tempo -> case parseString parse inp of
             Right exp -> playNotes (15/tempo) (evalExp exp) dest
             Left err -> print err
     }
@@ -202,11 +202,11 @@ gameFromSchema conn expdist tempo = do
             "ref" -> liftIO (putStrLn "C" >> playNotes 1 (Prim 60) conn) >> iter exp notes
             "giveup" -> liftIO (putStrLn (pretty exp))
             _ | "audition " `isPrefixOf` ans -> 
-                case parse expParser (drop (length "audition ") ans) of
+                case parseString parse (drop (length "audition ") ans) of
                     Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
                     Right exp' -> liftIO (playNotes (15/tempo) (evalExp exp') conn) >> iter exp notes
               | otherwise ->
-                case parse expParser ans of
+                case parseString parse ans of
                     Left err -> liftIO (putStrLn $ "Parse error: " ++ show err) >> iter exp notes
                     Right exp' -> if evalExp exp' == notes
                                  then liftIO $ putStrLn ("Correct: " ++ pretty exp)  >> play notes
