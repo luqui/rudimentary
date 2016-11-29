@@ -1,8 +1,39 @@
 <html>
  <head>
   <script src="resources/jquery-3.1.1.min.js"></script>
+  <!-- bootstrap stuff -->
+  <!-- Latest compiled and minified CSS -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+  <!-- Optional theme -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
+  <!-- Latest compiled and minified JavaScript -->
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
  </head>
+<script>
+ $(function() {
+  $('#devices_menu_activate').click(function() {
+    $.ajax({ url: '/devices' }).then(function(data) {
+      $('#devices_menu').empty();
+      for (var i in data) {
+        (function() {
+            var dev = data[i];
+            $('#devices_menu').append($('<li>').append(
+                $('<a>').append(dev)
+                        .attr('href', '#')
+                        .click(function() {
+                            $('#currentDevice').text(dev);
+                        })));
+        })();
+      }
+    });
+  });
+ });
+</script>
  <body>
-  Index!!
+  <div class="dropdown">
+    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="devices_menu_activate">Device: <span id="currentDevice">none</span><span class="caret"></span></a>
+    <ul class="dropdown-menu" id="devices_menu">
+    </ul>
+  </div>
  </body>
 </html>
