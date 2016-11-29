@@ -55,7 +55,7 @@
 
         $('#levelcontent').append(
             $('<h2>').text(data.name),
-            $('<p>').text(data.desc),
+            $('<p>').html(data.desc),
             $('<div>').addClass('row').append(
                 $('<div>').addClass('col-md-8').append(input),
                 $('<div>').addClass('col-md-4').append(button)),

@@ -29,7 +29,8 @@ data Level = Level {
 
 levels :: [Level]
 levels = [
-    majorScaleIntervals ]
+    majorScaleIntervals,
+    majorScaleIntervalsOct ]
 
 majorScaleIntervals :: Level
 majorScaleIntervals = Level {
@@ -39,5 +40,20 @@ majorScaleIntervals = Level {
     levelSpec = do
         i <- uniform [1..7]
         return (Exp (Scale (Note 0) (Mode Natural 7)) (DERun [Degree 0 0, Degree i 0]), 
-                (== show (i+1)))
+                (== show ((i `mod` 7) + 1)))
+  }
+
+
+majorScaleIntervalsOct :: Level
+majorScaleIntervalsOct = Level {
+    levelName = "Major scale intervals (with octave differences)",
+    levelDesc = concat ["I will play the 1 and then another degree of the major scale, ",
+                        "and you need to identify which degree that is as a number. Ignore ",
+                        "octave differences, so if I play a C and then a D <i>below</i> it, the ",
+                        "answer is 2."],
+    levelSpec = do
+        i <- uniform [-14..14]
+        refoct <- uniform [-14,-7,0,7,14]
+        return (Exp (Scale (Note 0) (Mode Natural 7)) (DERun [Degree refoct 0, Degree i 0]), 
+                (== show ((i `mod` 7) + 1)))
   }

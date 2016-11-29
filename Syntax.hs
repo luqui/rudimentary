@@ -139,7 +139,7 @@ instance Syntax Scale where
     parse = Scale <$> parse <*> parse
 
 instance Syntax Degree where
-    pretty (Degree n acc) = showacc ++ show (1+n)
+    pretty (Degree n acc) = showacc ++ show (signum n * (1 + abs n))
         where
         showacc | acc < 0 = replicate (-acc) 'b'
                 | otherwise = replicate acc '#'
