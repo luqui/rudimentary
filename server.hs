@@ -27,11 +27,14 @@ main = S.scotty 3000 $ do
         expstr <- S.param "exp"
 
         case Syntax.parseString Syntax.parse expstr of
-            Left err -> S.html . fromString . show $ err
+            Left err -> S.json $ J.object [ 
+                "type" J..= J.String "error",
+                "message" J..= J.String (fromString (show err)) ]
             Right expr -> do
                 dev <- liftIO $ MIDI.connectOutput devname
                 liftIO $ MIDI.playNotes 1 (Semantics.evalExp expr) dev
-        S.json $ J.object []
+                S.json $ J.object [
+                    "type" J..= J.String "success" ]
 
     S.get "/devices" $ do
         devnames <- liftIO $ mapM SysMid.getName =<< SysMid.enumerateDestinations

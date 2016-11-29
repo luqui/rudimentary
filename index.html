@@ -21,19 +21,43 @@
                 $('<a>').append(dev)
                         .attr('href', '#')
                         .click(function() {
-                            $('#currentDevice').text(dev);
+                            $('#current_device').text(dev);
                         })));
         })();
       }
     });
   });
+  
+  $('#expr').keyup(function(e){
+    if(e.keyCode == 13)
+    {
+      if ($('#current_device').text() == "none") {
+        alert('You must select a MIDI device');
+        return;
+      }
+      $('#errormsg_box').empty();
+      $.ajax({ url: '/play?dev=' + encodeURIComponent($('#current_device').text())
+                       + '&exp=' + encodeURIComponent($('#expr').val()) }).then(function(r) {
+        if (r.type === 'error') {
+          $('#errormsg_box').append(
+            $('<div>').addClass('alert alert-danger').text(r.message));
+        }
+      });
+    }
+  }); 
  });
 </script>
  <body>
-  <div class="dropdown">
-    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="devices_menu_activate">Device: <span id="currentDevice">none</span><span class="caret"></span></a>
-    <ul class="dropdown-menu" id="devices_menu">
-    </ul>
+  <div class="container">
+   <div class="dropdown">
+     <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" id="devices_menu_activate">MIDI Device: <span id="current_device">none</span><span class="caret"></span></a>
+     <ul class="dropdown-menu" id="devices_menu">
+     </ul>
+   </div>
+
+   <input type="text" class="form-control" id="expr" />
+   <div id="errormsg_box">
+   </div>
   </div>
  </body>
 </html>
