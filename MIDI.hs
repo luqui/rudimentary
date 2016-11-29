@@ -33,8 +33,8 @@ playNotes dt (m :+: m') conn = do
 playNotes dt (m :=: m') conn = do
     v <- newEmptyMVar
     v' <- newEmptyMVar
-    t <- forkFinally (playNotes dt m conn) $ \_ -> putMVar v ()
-    t' <- forkFinally (playNotes dt m' conn) $ \_ -> putMVar v' ()
+    _ <- forkFinally (playNotes dt m conn) $ \_ -> putMVar v ()
+    _ <- forkFinally (playNotes dt m' conn) $ \_ -> putMVar v' ()
     () <- takeMVar v
     () <- takeMVar v'
     return ()

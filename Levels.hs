@@ -12,7 +12,7 @@ type Dist = Rand.Rand Rand.StdGen
 dist :: [(Double, a)] -> Dist a
 dist choices = do
     x <- Rand.getRandomR (0, sum (map fst choices))
-    let choose accum [] = error "no choices"
+    let choose _ [] = error "no choices"
         choose accum ((p,a):as)
             | x <= accum + p  = return a
             | otherwise       = choose (accum+p) as
@@ -55,11 +55,7 @@ levels = [
         go n = do
             n1 <- uniform [0..6]
             (n1:) <$> go' (n-1) n1
-        go' 0 accum = return []
+        go' 0 _ = return []
         go' n accum = do
             ni <- uniform [1..3]
             ((accum+ni) :) <$> go' (n-1) (accum+ni)
-
-    adjust m n
-        | n >= m = n+1
-        | otherwise = n

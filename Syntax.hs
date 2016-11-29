@@ -14,6 +14,7 @@ type Parser = P.Parsec String ()
 parseString :: Parser a -> String -> Either P.ParseError a
 parseString parser = P.parse (parser <* P.eof) "<input>"
 
+tok :: P.TokenParser s
 tok = P.makeTokenParser $ P.LanguageDef {
         P.commentStart = "",
         P.commentEnd = "",
@@ -141,7 +142,8 @@ instance Syntax Degree where
     pretty (Degree n acc) = showacc ++ show (1+n)
         where
         showacc | acc < 0 = replicate (-acc) 'b'
-                | acc >= 0 = replicate acc '#'
+                | otherwise = replicate acc '#'
+    pretty Rest = "~"
 
     parse = P.choice [
         flip Degree <$> accidentalParser <*> deg,
