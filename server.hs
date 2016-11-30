@@ -85,16 +85,16 @@ main = do
                     return . Map.insert sessionid (session { sessionAttempt = Just (expr, ans) })
                 return $ J.object []
             Just (expr, ans) -> do
-                forkIO $ MIDI.playNotes (60/tempo) (Semantics.evalExp expr) dev
+                let play = forkIO $ MIDI.playNotes (60/tempo) (Semantics.evalExp expr) dev
                 let grade = ans answer
-                if | null answer -> return $ J.object []
-                   | Just True <- grade -> do
+                if | null answer -> play >> return (J.object [])
+                   | Just True <- grade -> play >> do
                         modifyMVar_ sessions $
                             return . Map.insert sessionid (session { sessionAttempt = Nothing })
                         return $ J.object [
                             "correct" J..= J.Bool True,
                             "notation" J..= Syntax.pretty expr ]
-                   | Just False <- grade -> return $ J.object [
-                        "correct" J..= J.Bool False ]
+                   | Just False <- grade -> play >> return (J.object [
+                        "correct" J..= J.Bool False ])
                    | otherwise -> return $ J.object [
                         "correct" J..= J.Null ]

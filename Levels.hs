@@ -43,7 +43,8 @@ chooseLevels l = join . P.select l l . map toTuple
 
 levels :: Level
 levels = chooseLevels "Level" [
-    intervals ]
+    intervals,
+    chordQualities ]
 
 select :: String -> [(String, String, a)] -> Params a
 select title = P.select title title
@@ -113,3 +114,92 @@ majorOrChromatic = select "Scale"
         "as from the major scale, <i>minor</i> (<code>m</code>) to flat by 1.  So various valid ",
         "answers are <code>P4</code>, <code>m7</code> (so-called \"dominant 7\"), <code>M2</code>, ",
         "but not <code>m5</code> or <code>P3</code>." ]
+
+
+chordQualities :: Sublevel
+chordQualities = Sublevel {
+    slName = "Chord Qualities",
+    slDesc = "I will play a chord, and you tell me what kind of chord it is.",
+    slLevel = do
+        selectFrom <- select "Chord Types" 
+            [ ("Major, Minor", 
+               "Just distinguish between major (<code>maj</code>) and minor (<code>min</code>).",
+                ["maj", "min"])
+            , ("Triads", 
+               "Add augmented (<code>aug</code>) and diminished (<code>dim</code>) into the mix.",
+                ["maj", "min", "aug", "dim"])
+            , ("7 Chords",
+               "Distinguish between major 7 (<code>maj7</code>), minor 7 (<code>min7</code>), and "++
+               "dominant 7 (<code>dom7</code>) chords.",
+               ["maj7", "min7", "dom7"])
+            , ("Diminished chords",
+               "Distinguish between regular diminished (<code>dim</code>), half-diminished "++
+               "(<code>halfdim</code>) and fully diminished (<code>dim7</code>) chords.",
+               ["dim", "halfdim", "dim7"])
+            , ("Exotic chords",
+               "Distinguish between minor-major (<code>minmaj</code>), augmented 7 "++
+               "(<code>aug7</code>), and fully diminished chords (<code>dim7</code>).",
+               ["aug7", "minmaj", "dim7"])
+            , ("Tetrachords",
+               "All the four-note chord forms covered so far: <code>maj7</code>, "++
+               "<code>min7</code>, <code>dom7</code>, <code>dim</code>, <code>halfdim</code>, "++
+               "<code>dim7</code>, <code>aug7</code>, and <code>minmaj</code>.",
+               ["maj7", "min7", "dom7", "halfdim", "aug7", "minmaj", "dim7"])
+            , ("All chords",
+               "Tetrachords and triads at the same time.",
+               (Map.keys chordTypes)) ]
+
+        voicing <- select "Voicing"
+            [ ("Root",
+               "The root of the chord is always the lowest, followed by the 3rd, 5th, and 7th in " ++
+               "ascending order.  This is the simplest voicing and should be used to get " ++
+               "familiar with new chord qualities.",
+               return)
+            , ("Closed",
+               "All the notes of the chord are as close together as possible, but the root might " ++
+               "not be on the bottom.",
+               randomInversion)
+            , ("Open",
+               "The notes of the chord are spread out with wider intervals.",
+               openVoicing) ]
+
+        keyDist <- select "Key"
+            [ ("C", "The root will always be the same, C", pure (Note 0))
+            , ("Random", "The reference tone will be a random note", Note <$> uniform [0..11]) ]
+
+        referenceTone <- select' "Reference Tone"
+            "Whether I play the root of the chord first."
+            [ ("Yes", DEConcat (DERun [Degree (-7) 0])), ("No", id) ]
+        
+        return $ do
+            key <- keyDist
+            chord <- uniform selectFrom
+            notes <- voicing (chordTypes Map.! chord)
+            return (Exp (Scale key (Mode Natural 7)) 
+                        (referenceTone (foldr1 DEParallel [ DERun [n] | n <- notes ])),
+                    grade selectFrom chord)
+    }
+    where
+    chordTypes = Map.fromList [
+        ("maj", [Degree 0 0, Degree 2 0, Degree 4 0]),
+        ("min", [Degree 0 0, Degree 2 (-1), Degree 4 0]),
+        ("dim", [Degree 0 0, Degree 2 (-1), Degree 4 (-1)]),
+        ("aug", [Degree 0 0, Degree 2 0, Degree 4 1]),
+        ("dom7", [Degree 0 0, Degree 2 0, Degree 4 0, Degree 6 (-1)]),
+        ("maj7", [Degree 0 0, Degree 2 0, Degree 4 0, Degree 6 0]),
+        ("min7", [Degree 0 0, Degree 2 (-1), Degree 4 0, Degree 6 (-1)]),
+        ("halfdim", [Degree 0 0, Degree 2 (-1), Degree 4 (-1), Degree 6 (-1)]),
+        ("dim7", [Degree 0 0, Degree 2 (-1), Degree 4 (-1), Degree 6 (-2)]),
+        ("aug7", [Degree 0 0, Degree 2 0, Degree 4 1, Degree 6 (-1)]),
+        ("minmaj", [Degree 0 0, Degree 2 (-1), Degree 4 0, Degree 6 0]) ]
+
+    randomInversion chord = do
+        invUp <- uniform [0..length chord-1]
+        return $ [ Degree (n+7) alt | Degree n alt <- take invUp chord ] ++ drop invUp chord
+
+    openVoicing chord = do
+        mapM (\(Degree n alt) -> Degree <$> ((n+) <$> uniform [-7,0,7]) <*> pure alt) chord
+
+    grade selectFrom correct ans
+        | ans `elem` selectFrom = Just (correct == ans)
+        | otherwise = Nothing
