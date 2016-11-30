@@ -70,10 +70,7 @@ intervals = Sublevel {
         let minNote = -7 * (octRange `div` 2)
         let maxNote = 7 * ((octRange+1) `div` 2)
 
-        keyDist <- select "Key"
-            [ ("C", "The reference tone will always be the same, C", pure (Note 0))
-            , ("Random", "The reference tone will be a random note", Note <$> uniform [0..11]) ]
-
+        keyDist <- selectKey
         scale <- majorOrChromatic
 
         return $ do
@@ -116,6 +113,12 @@ majorOrChromatic = select "Scale"
         "but not <code>m5</code> or <code>P3</code>." ]
 
 
+selectKey :: Params (Dist Note)
+selectKey = select "Key"
+    [ ("C", "The reference tone will always be the same, C", pure (Note 0))
+    , ("Random", "The reference tone will be a random note", Note <$> uniform [0..11]) ]
+
+
 chordQualities :: Sublevel
 chordQualities = Sublevel {
     slName = "Chord Qualities",
@@ -149,23 +152,8 @@ chordQualities = Sublevel {
                "Tetrachords and triads at the same time.",
                (Map.keys chordTypes)) ]
 
-        voicing <- select "Voicing"
-            [ ("Root",
-               "The root of the chord is always the lowest, followed by the 3rd, 5th, and 7th in " ++
-               "ascending order.  This is the simplest voicing and should be used to get " ++
-               "familiar with new chord qualities.",
-               return)
-            , ("Closed",
-               "All the notes of the chord are as close together as possible, but the root might " ++
-               "not be on the bottom.",
-               randomInversion)
-            , ("Open",
-               "The notes of the chord are spread out with wider intervals.",
-               openVoicing) ]
-
-        keyDist <- select "Key"
-            [ ("C", "The root will always be the same, C", pure (Note 0))
-            , ("Random", "The reference tone will be a random note", Note <$> uniform [0..11]) ]
+        voicing <- selectVoicing
+        keyDist <- selectKey
 
         referenceTone <- select' "Reference Tone"
             "Whether I play the root of the chord first."
@@ -193,6 +181,26 @@ chordQualities = Sublevel {
         ("aug7", [Degree 0 0, Degree 2 0, Degree 4 1, Degree 6 (-1)]),
         ("minmaj", [Degree 0 0, Degree 2 (-1), Degree 4 0, Degree 6 0]) ]
 
+    grade selectFrom correct ans
+        | ans `elem` selectFrom = Just (correct == ans)
+        | otherwise = Nothing
+
+
+selectVoicing :: Params ([Degree] -> Dist [Degree])
+selectVoicing = select "Voicing"
+    [ ("Root",
+       "The root of the chord is always the lowest, followed by the 3rd, 5th, and 7th in " ++
+       "ascending order.  This is the simplest voicing and should be used to get " ++
+       "familiar with new chord qualities.",
+       return)
+    , ("Closed",
+       "All the notes of the chord are as close together as possible, but the root might " ++
+       "not be on the bottom.",
+       randomInversion)
+    , ("Open",
+       "The notes of the chord are spread out with wider intervals.",
+       openVoicing) ]
+    where
     randomInversion chord = do
         invUp <- uniform [0..length chord-1]
         return $ [ Degree (n+7) alt | Degree n alt <- take invUp chord ] ++ drop invUp chord
@@ -200,6 +208,3 @@ chordQualities = Sublevel {
     openVoicing chord = do
         mapM (\(Degree n alt) -> Degree <$> ((n+) <$> uniform [-7,0,7]) <*> pure alt) chord
 
-    grade selectFrom correct ans
-        | ans `elem` selectFrom = Just (correct == ans)
-        | otherwise = Nothing
