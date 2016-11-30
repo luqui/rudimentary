@@ -100,6 +100,5 @@ majorOrChromatic = select "Scale"
                             Left _ -> Nothing
                             Right x -> Just (compareDegrees deg x)
     compareDegrees i j = 
-        Semantics.applyScale cMajor (norm i) == Semantics.applyScale cMajor (norm j)
-    norm (Degree i acc) = Degree (i `mod` 7) acc
+        Semantics.applyScale cMajor i `mod` 12 == Semantics.applyScale cMajor j `mod` 12
     cMajor = Semantics.renderScale (Scale (Note 0) (Mode Natural 7))
