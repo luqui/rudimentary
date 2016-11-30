@@ -61,7 +61,7 @@ intervals = Sublevel {
             "Octave Range" 
             (concat ["How many octaves the interval spans.  Ignore octave differences ",
                      "in your answer, so if I play a C and then a D below it, the answer ",
-                     "is still 2."])  
+                     "is still 2.  It's the <i>first</i> note that defines the root."])  
             [ (show r, r) | r <- [1..5] ]
         let minNote = -7 * (octRange `div` 2)
         let maxNote = 7 * ((octRange+1) `div` 2)
