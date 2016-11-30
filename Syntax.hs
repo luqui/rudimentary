@@ -2,7 +2,7 @@ module Syntax where
 
 import Control.Applicative
 import Control.Monad (when)
-import Data.List (intercalate)
+import Data.List (intercalate, sort)
 import Data.Tuple (swap)
 import qualified Data.Char as Char
 import qualified Data.Map as Map
@@ -160,7 +160,9 @@ instance Syntax Degree where
             return $ signum i * (abs i - 1)
 
 parseSimpleInterval :: Parser Degree
-parseSimpleInterval = P.choice [ Degree (n-1) 0 <$ P.try (P.symbol tok (show n)) | n <- [1..14] ]
+-- we reverse the numbers so that e.g. "11" doesn't match "1" and then commit.
+parseSimpleInterval = P.choice [ Degree (n-1) 0 <$ P.try (P.symbol tok (show n)) 
+                               | n <- reverse [1..14] ]
 
 parseInterval :: Parser Degree   -- gives degrees of the major scale
 parseInterval = P.try perfect <|> colored
@@ -171,7 +173,7 @@ parseInterval = P.try perfect <|> colored
     perfect = flip Degree <$> perfectQ <*> numbers (concat [ map (+ 7*o) [1,4,5] | o <- [0,1] ])
     colored = flip Degree <$> coloredQ <*> numbers (concat [ map (+ 7*o) [2,3,6,7] | o <- [0,1] ])
 
-    numbers nums = P.choice [ (n-1) <$ P.symbol tok (show n) | n <- nums ]
+    numbers nums = P.choice [ (n-1) <$ P.try (P.symbol tok (show n)) | n <- reverse (sort nums) ]
 
 degreeRunParser :: Parser [Degree]
 degreeRunParser = P.choice [
