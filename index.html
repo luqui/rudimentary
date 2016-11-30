@@ -36,8 +36,10 @@
     $.ajax({
       url: '/level?params=' + encodeURIComponent(JSON.stringify(params)) }
     ).then(function(data) {
+      var scrollpos = $(window).scrollTop();
       container.empty();
-      render_level(data, container);
+      render_level(data,container);
+      $(window).scrollTop(scrollpos);
     });
   };
 
@@ -72,12 +74,12 @@
                         .click(function() {
                           params[component.label] = component.options[opt].name; //XXX name->value
                           fetch_level(params, container);
+                          return false;
                         })));
           })();
         }
         var description = '';
         for (var opt in component.options) {
-          console.log('Checking ', component.options[opt].name, 'against', component.value);
           if (component.options[opt].name === component.value) { //XXX name->value
             description = component.options[opt].desc;
           }
