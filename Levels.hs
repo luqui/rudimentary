@@ -86,8 +86,7 @@ majorOrChromatic :: Params (Int -> (Dist Degree, Degree -> String -> Maybe Bool)
 majorOrChromatic = select "Scale"
         [ ("Major", "All intervals will be generated in the major scale, your answer " ++
                     "is just a number for degree of the scale.", majorDist)
-        , ("Chromatic", "Arbitrary intervals will be generated.  Your answer will include " ++
-                    "the interval and the quality, e.g. M7, m3, P5", chrDist) ]
+        , ("Chromatic", chromaticHelpText, chrDist) ]
     where
     majorDist deg = (pure (Degree deg 0), runParser parseSimpleInterval)
 
@@ -102,3 +101,12 @@ majorOrChromatic = select "Scale"
     compareDegrees i j = 
         Semantics.applyScale cMajor i `mod` 12 == Semantics.applyScale cMajor j `mod` 12
     cMajor = Semantics.renderScale (Scale (Note 0) (Mode Natural 7))
+
+    chromaticHelpText = concat [
+        "Aribtrary intervals will be generated. Your answer will include the interval and ",
+        "the quality.  1,4,5 can be either <i>perfect</i> (notated <code>P</code>), ",
+        "<i>augmented</i> (<code>aug</code>) to sharp by one, or <i>diminished</i> ",
+        "(<code>dim</code>) to flat by one.  2,3,6,7 can be either <i>major</i> (<code>M</code>) ", 
+        "as from the major scale, <i>minor</i> (<code>m</code>) to flat by 1.  So various valid ",
+        "answers are <code>P4</code>, <code>m7</code> (so-called \"dominant 7\"), <code>M2</code>, ",
+        "but not <code>m5</code> or <code>P3</code>." ]
