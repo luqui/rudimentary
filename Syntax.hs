@@ -159,6 +159,20 @@ instance Syntax Degree where
             when (i == 0) $ fail "degrees cannot be zero"
             return $ signum i * (abs i - 1)
 
+parseSimpleInterval :: Parser Degree
+parseSimpleInterval = P.choice [ Degree (n-1) 0 <$ P.try (P.symbol tok (show n)) | n <- [1..14] ]
+
+parseInterval :: Parser Degree   -- gives degrees of the major scale
+parseInterval = P.try perfect <|> colored
+    where
+    perfectQ = P.choice [ v <$ P.symbol tok n | (v,n) <- [(-1, "dim"), (0, "P"), (1, "aug")]]
+    coloredQ = P.choice [ v <$ P.symbol tok n | (v,n) <- [(-2, "dim"), (-1, "m"), (0, "M"), (1, "aug") ]]
+
+    perfect = flip Degree <$> perfectQ <*> numbers (concat [ map (+ 7*o) [1,4,5] | o <- [0,1] ])
+    colored = flip Degree <$> coloredQ <*> numbers (concat [ map (+ 7*o) [2,3,6,7] | o <- [0,1] ])
+
+    numbers nums = P.choice [ (n-1) <$ P.symbol tok (show n) | n <- nums ]
+
 degreeRunParser :: Parser [Degree]
 degreeRunParser = P.choice [
     parse `P.sepBy1` P.symbol tok ",",

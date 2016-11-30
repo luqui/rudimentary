@@ -21,7 +21,7 @@ import qualified Semantics
 
 data Session = Session {
     sessionParams :: Map.Map String String,
-    sessionAttempt :: Maybe (Syntax.Exp, String -> Bool) }
+    sessionAttempt :: Maybe (Syntax.Exp, String -> Maybe Bool) }
 
 selectJSON :: [(String, Params.SelectWidget, String)] -> J.Value
 selectJSON outs = J.Array . fromList $ do
@@ -86,12 +86,15 @@ main = do
                 return $ J.object []
             Just (expr, ans) -> do
                 forkIO $ MIDI.playNotes (60/tempo) (Semantics.evalExp expr) dev
+                let grade = ans answer
                 if | null answer -> return $ J.object []
-                   | ans answer -> do
+                   | Just True <- grade -> do
                         modifyMVar_ sessions $
                             return . Map.insert sessionid (session { sessionAttempt = Nothing })
                         return $ J.object [
                             "correct" J..= J.Bool True,
                             "notation" J..= Syntax.pretty expr ]
-                   | otherwise -> return $ J.object [
+                   | Just False <- grade -> return $ J.object [
                         "correct" J..= J.Bool False ]
+                   | otherwise -> return $ J.object [
+                        "correct" J..= J.Null ]

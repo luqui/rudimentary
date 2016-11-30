@@ -121,15 +121,19 @@
                            + '&tempo=' + encodeURIComponent($('#tempo').val())
                            + '&session=' + encodeURIComponent(ajaxData.session)
                            + '&answer=' + encodeURIComponent(ans) }).then(function(response) {
-        if ('correct' in response && response.correct) {
+        if ('correct' in response && response.correct === true) {
           errorbox.append(
             $('<div>').addClass('alert alert-success').html(
               "Correct!<br>Notation:<pre>" + response.notation + "</pre>"));
           input.val('');
         }
-        else if ('correct' in response && !response.correct) {
+        else if ('correct' in response && response.correct === false) {
           errorbox.append(
             $('<div>').addClass('alert alert-danger').text('Incorrect!'));
+        }
+        else if ('correct' in response && response.correct === null) {
+          errorbox.append(
+            $('<div>').addClass('alert alert-warning').text('Invalid input, no understand.'));
         }
       });
     }
@@ -149,7 +153,7 @@
      </div>
     </div>
     <div class="col-md-6">
-     Tempo <input id="tempo" value="60" size="4" /> bpm
+     Tempo <input id="tempo" value="100" size="4" /> bpm
     </div>
    </div>
 
