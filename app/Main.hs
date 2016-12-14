@@ -2,7 +2,7 @@
 
 import Control.Concurrent.MVar
 import Control.Concurrent (forkIO)
-import Control.Monad.Trans (liftIO)
+import Control.Monad.IO.Class (liftIO)
 import Data.Monoid ((<>))
 import Data.String (fromString)
 import GHC.Exts (fromList)

@@ -7,7 +7,7 @@ import Control.Monad.Trans.Reader
 import Control.Monad.Trans.Writer
 import Data.Monoid
 import Control.Arrow (second)
-import Control.Monad.Trans (lift)
+import Control.Monad.Trans.Class (lift)
 import qualified Data.DList as DList
 import qualified Data.Map as Map
 
