@@ -16,6 +16,15 @@ connectOutput destName = do
     putStrLn . ("Connected to destintion " ++) =<< SysMid.getName destination
     return conn
 
+connectInput :: String -> IO SysMid.Connection
+connectInput srcName = do
+    sources <- SysMid.enumerateSources
+    [source] <- filterM (\d -> (srcName ==) <$> SysMid.getName d) sources
+    conn <- SysMid.openSource source Nothing
+    putStrLn . ("Connected to source " ++) =<< SysMid.getName source
+    SysMid.start conn
+    return conn
+
 midiLock :: IO a -> IO a
 midiLock = \action -> do takeMVar lock ; x <- action ; putMVar lock () ; return x
     where
